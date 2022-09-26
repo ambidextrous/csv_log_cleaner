@@ -15,10 +15,12 @@ struct Args {
     input: String,
     #[clap(short = 'o', long, value_parser)]
     output: String,
-    #[clap(short = 's', long, value_parser)]
+    #[clap(short = 'j', long, value_parser)]
     schema: String,
     #[clap(short = 'l', long, value_parser)]
     log: String,
+    #[clap(short = 's', long, value_parser, default_value_t = ',')]
+    sep: char,
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
@@ -30,7 +32,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     let output_csv_path = args.output;
     let log_path = args.log;
     let schema_map = generate_validated_schema(json_schema)?;
-    let result = process_rows(&input_csv_path, &output_csv_path, &log_path, schema_map);
+    let byte_sep = args.sep as u8;
+    let result = process_rows(
+        &input_csv_path,
+        &output_csv_path,
+        &log_path,
+        schema_map,
+        byte_sep,
+    );
 
     result
 }

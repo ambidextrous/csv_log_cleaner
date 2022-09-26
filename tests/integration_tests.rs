@@ -24,9 +24,17 @@ fn end_to_end() {
         fs::read_to_string(expected_output_log_path).expect("Failed to read expected log");
     let schema_map =
         generate_validated_schema(json_schema).expect("Failed generating validated schema");
+    let char_sep = ',';
+    let sep = char_sep as u8;
 
     // Act
-    let result = process_rows(&input_csv_path, &output_csv_path, &log_path, schema_map);
+    let result = process_rows(
+        &input_csv_path,
+        &output_csv_path,
+        &log_path,
+        schema_map,
+        sep,
+    );
     let output_csv =
         fs::read_to_string(output_csv_path).expect("Failed to read output CSV from temp dir");
     let output_log = fs::read_to_string(log_path).expect("Failed to read output log from temp dir");

@@ -62,12 +62,15 @@ pub fn process_rows(
     output_path: &String,
     log_path: &String,
     schema_map: HashMap<String, Column>,
+    sep: u8,
 ) -> Result<(), Box<dyn Error>> {
     let mut row_count = 0;
     let null_vals = get_null_vals();
     let header_input_file = File::open(input_path)?;
     let mut header_rdr = csv::Reader::from_reader(header_input_file);
-    let mut wtr = csv::Writer::from_path(output_path)?;
+    let mut wtr = csv::WriterBuilder::new()
+        .delimiter(sep)
+        .from_path(output_path)?;
     let column_names = header_rdr.headers()?;
     wtr.write_record(&column_names.clone())?;
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
@@ -87,8 +90,9 @@ pub fn process_rows(
         .zip(column_logs.clone().into_iter())
         .collect();
     let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
-    let input_file = File::open(input_path)?;
-    let mut rdr = csv::Reader::from_reader(input_file);
+    let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(sep)
+        .from_path(input_path)?;
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
