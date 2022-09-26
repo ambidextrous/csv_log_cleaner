@@ -1,0 +1,26 @@
+{
+	"total_rows": 3,
+	"columns_with_errors": [
+		{
+			"column_name": "DATE_COLUMN",
+			"invalid_row_count": 2,
+			"max_illegal_val": "not_a_date",
+			"min_illegal_val": "a_date"
+		},{
+			"column_name": "INT_COLUMN",
+			"invalid_row_count": 2,
+			"max_illegal_val": "not_an_int",
+			"min_illegal_val": "an_int"
+		},{
+			"column_name": "STRING_COLUMN",
+			"invalid_row_count": 0,
+			"max_illegal_val": "",
+			"min_illegal_val": ""
+		},{
+			"column_name": "ENUM_COLUMN",
+			"invalid_row_count": 1,
+			"max_illegal_val": "V5",
+			"min_illegal_val": "V5"
+		}
+	]
+}

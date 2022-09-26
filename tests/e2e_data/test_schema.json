@@ -1,0 +1,25 @@
+{
+    "columns": [
+        {
+            "name": "INT_COLUMN",
+            "column_type": "Int"
+        },
+        {
+            "name": "STRING_COLUMN",
+            "column_type": "String",
+            "nullable": false
+        },
+        {
+            "name": "DATE_COLUMN",
+            "column_type": "Date",
+            "format": "%Y-%m-%d"
+        },
+        {
+            "name": "ENUM_COLUMN",
+            "column_type": "Enum",
+            "nullable": false,
+            "legal_vals": ["V1", "V2", "V3"],
+            "illegal_val_replacement": "V1"
+        }
+    ]
+}

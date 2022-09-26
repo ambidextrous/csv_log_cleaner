@@ -1,0 +1,4 @@
+INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
+4,dog,2020-12-31,V1
+not_an_int,cat,not_a_date,V2
+an_int,weasel,a_date,V5

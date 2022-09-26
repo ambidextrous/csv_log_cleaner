@@ -64,6 +64,7 @@ pub fn process_rows(
     schema_map: HashMap<String, Column>,
 ) -> Result<(), Box<dyn Error>> {
     let mut row_count = 0;
+    let null_vals = get_null_vals();
     let header_input_file = File::open(input_path)?;
     let mut header_rdr = csv::Reader::from_reader(header_input_file);
     let mut wtr = csv::Writer::from_path(output_path)?;
@@ -91,7 +92,13 @@ pub fn process_rows(
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
-        let cleaned_row = process_row(column_names, &schema_map, row_map, &mut mut_log_map)?;
+        let cleaned_row = process_row(
+            column_names,
+            &schema_map,
+            row_map,
+            &mut mut_log_map,
+            &null_vals,
+        )?;
         wtr.write_record(&cleaned_row)?;
     }
     let log_map_all = jsonify_log_map(mut_log_map.clone(), &row_count);
@@ -108,13 +115,14 @@ fn process_row<'a>(
     schema_dict: &'a HashMap<String, Column>,
     row_map: HashMap<String, String>,
     log_map: &'a mut HashMap<String, ColumnLog>,
+    null_vals: &Vec<String>,
 ) -> Result<StringRecord, Box<dyn Error>> {
     let mut processed_row = Vec::new();
     for column_name in ordered_column_names {
         let column_value = row_map.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in row map")
         })?;
-        let cleaned_value = column_value.clean();
+        let cleaned_value = column_value.clean(&null_vals);
         let column = schema_dict.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in schema`")
         })?;
@@ -262,43 +270,43 @@ trait Process {
 impl Process for String {
     fn process(&self, column: &Column) -> Self {
         match column.column_type {
-            ColumnType::String => self.clean(),
+            ColumnType::String => self.to_string(),
             ColumnType::Int => {
-                let cleaned = self.clean().de_pseudofloat();
+                let cleaned = self.de_pseudofloat();
                 if cleaned.casts_to_int() {
-                    cleaned
+                    cleaned.to_string()
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
             }
             ColumnType::Date => {
-                let cleaned = self.clean();
+                let cleaned = self;
                 if cleaned.casts_to_date(&column.format) {
-                    cleaned
+                    cleaned.to_string()
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
             }
             ColumnType::Float => {
-                let cleaned = self.clean();
+                let cleaned = self;
                 if cleaned.casts_to_float() {
-                    cleaned
+                    cleaned.to_string()
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
             }
             ColumnType::Enum => {
-                let cleaned = self.clean();
+                let cleaned = self;
                 if cleaned.casts_to_enum(&column.legal_vals) {
-                    cleaned
+                    cleaned.to_string()
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
             }
             ColumnType::Bool => {
-                let cleaned = self.clean();
+                let cleaned = self;
                 if cleaned.casts_to_bool() {
-                    cleaned
+                    cleaned.to_string()
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
@@ -307,32 +315,36 @@ impl Process for String {
     }
 }
 
+fn get_null_vals() -> Vec<String> {
+    let null_vals = vec![
+        "#N/A".to_string(),
+        "#N/A".to_string(),
+        "N/A".to_string(),
+        "#NA".to_string(),
+        "-1.#IND".to_string(),
+        "-1.#QNAN".to_string(),
+        "-NaN".to_string(),
+        "-nan".to_string(),
+        "1.#IND".to_string(),
+        "1.#QNAN".to_string(),
+        "<NA>".to_string(),
+        "N/A".to_string(),
+        "NA".to_string(),
+        "NULL".to_string(),
+        "NaN".to_string(),
+        "n/a".to_string(),
+        "nan".to_string(),
+        "null".to_string(),
+    ];
+    null_vals
+}
+
 trait Clean {
-    fn clean(&self) -> Self;
+    fn clean(&self, null_vals: &Vec<String>) -> Self;
 }
 
 impl Clean for String {
-    fn clean(&self) -> Self {
-        let null_vals = vec![
-            "#N/A".to_string(),
-            "#N/A".to_string(),
-            "N/A".to_string(),
-            "#NA".to_string(),
-            "-1.#IND".to_string(),
-            "-1.#QNAN".to_string(),
-            "-NaN".to_string(),
-            "-nan".to_string(),
-            "1.#IND".to_string(),
-            "1.#QNAN".to_string(),
-            "<NA>".to_string(),
-            "N/A".to_string(),
-            "NA".to_string(),
-            "NULL".to_string(),
-            "NaN".to_string(),
-            "n/a".to_string(),
-            "nan".to_string(),
-            "null".to_string(),
-        ];
+    fn clean(&self, null_vals: &Vec<String>) -> Self {
         if null_vals.contains(self) {
             "".to_string()
         } else {
@@ -449,8 +461,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
         // Arrange
         let input = vec!["NULL".to_string(), "".to_string(), " dog\t".to_string()];
         let expected = vec!["".to_string(), "".to_string(), " dog\t".to_string()];
+        let null_vals = get_null_vals();
         // Act
-        let result = input.iter().map(|x| x.clean()).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.clean(&null_vals))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
