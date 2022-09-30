@@ -64,6 +64,8 @@ pub fn process_rows(
     schema_map: HashMap<String, Column>,
     sep: u8,
 ) -> Result<(), Box<dyn Error>> {
+    // Process CSV row by row in memory buffer, writing the output to disk
+    // as you go.
     let mut row_count = 0;
     let null_vals = get_null_vals();
     let header_input_file = File::open(input_path)?;
@@ -121,6 +123,7 @@ fn process_row<'a>(
     log_map: &'a mut HashMap<String, ColumnLog>,
     null_vals: &Vec<String>,
 ) -> Result<StringRecord, Box<dyn Error>> {
+    // Process a single CSV row
     let mut processed_row = Vec::new();
     for column_name in ordered_column_names {
         let column_value = row_map.get(column_name).ok_or_else(|| {
@@ -320,6 +323,8 @@ impl Process for String {
 }
 
 fn get_null_vals() -> Vec<String> {
+    // Values that will be treated as NULL, based on the ones used by 
+    // Pandas: https://pandas.pydata.org/docs/reference/api/pandas.read_csv.html
     let null_vals = vec![
         "#N/A".to_string(),
         "#N/A".to_string(),

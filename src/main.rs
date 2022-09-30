@@ -10,7 +10,7 @@ use std::process;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    // Set-up CLI
+    // Set up CLI
     #[clap(short = 'i', long, value_parser)]
     input: String,
     #[clap(short = 'o', long, value_parser)]
@@ -25,7 +25,6 @@ struct Args {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    // Parse JSON schema to Schema to
     let schema_string = fs::read_to_string(args.schema)?;
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let input_csv_path = args.input;
