@@ -7,6 +7,7 @@ use std::fs;
 #[test]
 fn end_to_end() {
     // Arrange
+    let schema_path = format!("tests/e2e_data/test_schema.json");
     let schema_string =
         fs::read_to_string("tests/e2e_data/test_schema.json").expect("Failed reading JSON schema");
     let json_schema: JsonSchema =
@@ -32,7 +33,7 @@ fn end_to_end() {
         &input_csv_path,
         &output_csv_path,
         &log_path,
-        schema_map,
+        &schema_path,
         sep,
     );
     let output_csv =

@@ -61,12 +61,15 @@ pub fn process_rows(
     input_path: &String,
     output_path: &String,
     log_path: &String,
-    schema_map: HashMap<String, Column>,
+    schema_path: &String,
     sep: u8,
 ) -> Result<(), Box<dyn Error>> {
     // Process CSV row by row in memory buffer, writing the output to disk
     // as you go.
     let mut row_count = 0;
+    let schema_string = fs::read_to_string(schema_path)?;
+    let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;   
+    let schema_map = generate_validated_schema(json_schema)?;
     let null_vals = get_null_vals();
     let header_input_file = File::open(input_path)?;
     let mut header_rdr = csv::Reader::from_reader(header_input_file);

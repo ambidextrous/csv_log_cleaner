@@ -25,18 +25,16 @@ struct Args {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let schema_string = fs::read_to_string(args.schema)?;
-    let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let input_csv_path = args.input;
     let output_csv_path = args.output;
     let log_path = args.log;
-    let schema_map = generate_validated_schema(json_schema)?;
+    let schema_path = args.schema;
     let byte_sep = args.sep as u8;
     let result = process_rows(
         &input_csv_path,
         &output_csv_path,
         &log_path,
-        schema_map,
+        &schema_path,
         byte_sep,
     );
 
