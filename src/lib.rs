@@ -196,13 +196,13 @@ fn jsonify_log_map_all_or_errors(
     let mut is_first_row = true;
     for (column_name, column_log) in log_map.iter() {
         if column_log.invalid_count > 0 || !errors_only {
-            let mut max_val = "".to_string();
+            let mut max_val = String::new();
             {
                 if let Some(x) = &column_log.max_invalid {
                     max_val = x.clone();
                 }
             }
-            let mut min_val = "".to_string();
+            let mut min_val = String::new();
             {
                 if let Some(x) = &column_log.min_invalid {
                     min_val = x.clone();
@@ -226,7 +226,7 @@ pub fn generate_validated_schema(
     json_schema: JsonSchema,
 ) -> Result<HashMap<String, Column>, io::Error> {
     let empty_vec: Vec<String> = Vec::new();
-    let empty_string = "".to_string();
+    let empty_string = String::new();
     let mut column_map = HashMap::new();
     for column in json_schema.columns {
         let new_col = Column {
@@ -349,7 +349,7 @@ trait Clean {
 impl Clean for String {
     fn clean(&self, null_vals: &[String]) -> Self {
         if null_vals.contains(self) {
-            "".to_string()
+            String::new()
         } else {
             self.to_string()
         }
@@ -462,8 +462,8 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
     #[test]
     fn clean_string() {
         // Arrange
-        let input = vec!["NULL".to_string(), "".to_string(), " dog\t".to_string()];
-        let expected = vec!["".to_string(), "".to_string(), " dog\t".to_string()];
+        let input = vec!["NULL".to_string(), String::new(), " dog\t".to_string()];
+        let expected = vec![String::new(), String::new(), " dog\t".to_string()];
         let null_vals = get_null_vals();
         // Act
         let result = input
@@ -496,7 +496,7 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
     fn de_psuedofloats() {
         // Arrange
         let input = vec![
-            "".to_string(),
+            String::new(),
             "-3.0".to_string(),
             "264634633426.0".to_string(),
             "dog".to_string(),
@@ -504,7 +504,7 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             "1.0".to_string(),
         ];
         let expected = vec![
-            "".to_string(),
+            String::new(),
             "-3".to_string(),
             "264634633426".to_string(),
             "dog".to_string(),
@@ -520,14 +520,14 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
     #[test]
     fn process_string() {
         // Arrange
-        let input = vec!["".to_string(), " foo\t".to_string(), "bar".to_string()];
-        let expected = vec!["".to_string(), " foo\t".to_string(), "bar".to_string()];
+        let input = vec![String::new(), " foo\t".to_string(), "bar".to_string()];
+        let expected = vec![String::new(), " foo\t".to_string(), "bar".to_string()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
             column_type: ColumnType::String,
-            illegal_val_replacement: "".to_string(),
+            illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
-            format: "".to_string(),
+            format: String::new(),
         };
         // Act
         let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
@@ -539,13 +539,13 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
     fn process_int() {
         // Arrange
         let input = vec!["1".to_string(), "-2.0".to_string(), "3134.4".to_string()];
-        let expected = vec!["1".to_string(), "-2".to_string(), "".to_string()];
+        let expected = vec!["1".to_string(), "-2".to_string(), String::new()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
             column_type: ColumnType::Int,
-            illegal_val_replacement: "".to_string(),
+            illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
-            format: "".to_string(),
+            format: String::new(),
         };
         // Act
         let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
@@ -579,13 +579,13 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
         let input = vec![
             "2020-01-01".to_string(),
             " 2200-12-31\t".to_string(),
-            "".to_string(),
+            String::new(),
         ];
-        let expected = vec!["2020-01-01".to_string(), "".to_string(), "".to_string()];
+        let expected = vec!["2020-01-01".to_string(), String::new(), String::new()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
             column_type: ColumnType::Date,
-            illegal_val_replacement: "".to_string(),
+            illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
             format: "%Y-%m-%d".to_string(),
         };
@@ -604,7 +604,7 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             "264634633426".to_string(),
             "dog".to_string(),
             "0.4".to_string(),
-            "".to_string(),
+            String::new(),
         ];
         let expected = vec![true, true, true, false, true, false];
         // Act
@@ -616,14 +616,14 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
     #[test]
     fn process_float() {
         // Arrange
-        let input = vec!["".to_string(), " 0.1\t".to_string(), "123.456".to_string()];
-        let expected = vec!["".to_string(), "".to_string(), "123.456".to_string()];
+        let input = vec![String::new(), " 0.1\t".to_string(), "123.456".to_string()];
+        let expected = vec![String::new(), String::new(), "123.456".to_string()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
             column_type: ColumnType::Float,
-            illegal_val_replacement: "".to_string(),
+            illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
-            format: "".to_string(),
+            format: String::new(),
         };
         // Act
         let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
@@ -640,7 +640,7 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             "C".to_string(),
             "7".to_string(),
             "0.4".to_string(),
-            "".to_string(),
+            String::new(),
         ];
         let legal = vec!["A".to_string(), "B".to_string()];
         let expected = vec![true, true, false, false, false, false];
@@ -676,14 +676,14 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
     #[test]
     fn process_enum() {
         // Arrange
-        let input = vec!["".to_string(), " A\t".to_string(), "B".to_string()];
-        let expected = vec!["".to_string(), "".to_string(), "B".to_string()];
+        let input = vec![String::new(), " A\t".to_string(), "B".to_string()];
+        let expected = vec![String::new(), String::new(), "B".to_string()];
         let legal_vals = vec!["A".to_string(), "B".to_string()];
         let column = Column {
             column_type: ColumnType::Enum,
-            illegal_val_replacement: "".to_string(),
+            illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
-            format: "".to_string(),
+            format: String::new(),
         };
         // Act
         let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
