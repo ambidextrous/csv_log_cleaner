@@ -198,20 +198,14 @@ fn jsonify_log_map_all_or_errors(
         if column_log.invalid_count > 0 || !errors_only {
             let mut max_val = "".to_string();
             {
-                match &column_log.max_invalid {
-                    Some(x) => {
-                        max_val = x.clone();
-                    }
-                    None => {}
+                if let Some(x) = &column_log.max_invalid {
+                    max_val = x.clone();
                 }
             }
             let mut min_val = "".to_string();
             {
-                match &column_log.min_invalid {
-                    Some(x) => {
-                        min_val = x.clone();
-                    }
-                    None => {}
+                if let Some(x) = &column_log.min_invalid {
+                    min_val = x.clone();
                 }
             }
             let invalid_row_count = column_log.invalid_count.clone();
