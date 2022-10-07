@@ -89,7 +89,7 @@ pub fn process_rows(
     let column_log_tuples: Vec<(String, ColumnLog)> = column_string_names
         .clone()
         .into_iter()
-        .zip(column_logs.clone().into_iter())
+        .zip(column_logs.iter().cloned())
         .collect();
     let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
     let mut rdr = csv::ReaderBuilder::new()
@@ -323,7 +323,7 @@ impl Process for String {
 }
 
 fn get_null_vals() -> Vec<String> {
-    // Values that will be treated as NULL, based on the ones used by 
+    // Values that will be treated as NULL, based on the ones used by
     // Pandas: https://pandas.pydata.org/docs/reference/api/pandas.read_csv.html
     let null_vals = vec![
         "#N/A".to_string(),
@@ -349,11 +349,11 @@ fn get_null_vals() -> Vec<String> {
 }
 
 trait Clean {
-    fn clean(&self, null_vals: &Vec<String>) -> Self;
+    fn clean(&self, null_vals: &[String]) -> Self;
 }
 
 impl Clean for String {
-    fn clean(&self, null_vals: &Vec<String>) -> Self {
+    fn clean(&self, null_vals: &[String]) -> Self {
         if null_vals.contains(self) {
             "".to_string()
         } else {
@@ -383,11 +383,11 @@ impl CastsToBool for String {
 }
 
 trait CastsToEnum {
-    fn casts_to_enum(&self, legal_values: &Vec<String>) -> bool;
+    fn casts_to_enum(&self, legal_values: &[String]) -> bool;
 }
 
 impl CastsToEnum for String {
-    fn casts_to_enum(&self, legal_values: &Vec<String>) -> bool {
+    fn casts_to_enum(&self, legal_values: &[String]) -> bool {
         legal_values.contains(self)
     }
 }
