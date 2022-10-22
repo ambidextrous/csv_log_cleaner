@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use csv::StringRecord;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -230,7 +230,7 @@ pub fn generate_validated_schema(
 ) -> Result<HashMap<String, Column>, io::Error> {
     let empty_vec: Vec<String> = Vec::new();
     let empty_string = String::new();
-    let mut column_map = HashMap::new();
+    let mut column_map: HashMap<String, Column> = HashMap::default();
     for column in json_schema.columns {
         let new_col = Column {
             column_type: column.column_type.clone(),
