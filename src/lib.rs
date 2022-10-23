@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
 use csv::StringRecord;
+use rustc_hash::FxHashMap as HashMap;
 use serde::Deserialize;
 use serde::Serialize;
-use rustc_hash::FxHashMap as HashMap;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -68,7 +68,7 @@ pub fn process_rows(
     // as you go.
     let mut row_count = 0;
     let schema_string = fs::read_to_string(schema_path)?;
-    let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;   
+    let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
     let null_vals = get_null_vals();
     let header_input_file = File::open(input_path)?;
@@ -166,13 +166,12 @@ fn process_row<'a>(
                     min_invalid = Some(cleaned_value.clone());
                 }
             }
-            let new_column_log = ColumnLog {
-                name: column_log.name.clone(),
-                invalid_count: invalid_count,
-                min_invalid: min_invalid,
-                max_invalid: max_invalid,
-            };
-            log_map.insert(column_name.to_string(), new_column_log);
+            let column_log_mut = log_map.get_mut(&column_name.to_string()).ok_or_else(|| {
+                format!("Key error, could not find column_name `{column_name}` in log_map`")
+            })?;
+            column_log_mut.invalid_count = invalid_count;
+            column_log_mut.min_invalid = min_invalid;
+            column_log_mut.max_invalid = max_invalid;
         }
         processed_row.push(processed_value);
     }

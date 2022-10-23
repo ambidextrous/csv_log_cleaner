@@ -1,10 +1,6 @@
 use clap::Parser;
-use csv_cleaner::generate_validated_schema;
 use csv_cleaner::process_rows;
-use csv_cleaner::JsonSchema;
-use serde_json;
 use std::error::Error;
-use std::fs;
 use std::process;
 
 #[derive(Parser, Debug)]
