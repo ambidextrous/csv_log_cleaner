@@ -33,9 +33,17 @@ an_int,weasel,a_date,V5\n";
         generate_validated_schema(json_schema).expect("Failed generating validated schema");
     let char_sep = ',';
     let sep = char_sep as u8;
+    let buffer_size = 2;
 
     // Act
-    let result = process_rows(&mut rdr, &output_csv_path, &log_path, &schema_path, sep);
+    let result = process_rows(
+        &mut rdr,
+        &output_csv_path,
+        &log_path,
+        &schema_path,
+        sep,
+        buffer_size,
+    );
     let output_csv =
         fs::read_to_string(output_csv_path).expect("Failed to read output CSV from temp dir");
     let output_log = fs::read_to_string(log_path).expect("Failed to read output log from temp dir");

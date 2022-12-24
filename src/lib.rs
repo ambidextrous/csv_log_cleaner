@@ -70,6 +70,7 @@ pub fn process_rows(
     log_path: &String,
     schema_path: &String,
     sep: u8,
+    buffer_size: usize,
 ) -> Result<(), Box<dyn Error>> {
     // Process CSV row by row in memory buffer, writing the output to disk
     // as you go.
@@ -101,12 +102,11 @@ pub fn process_rows(
         .collect();
     let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
     let mut row_buffer = Vec::new();
-    let max_buffer_size = 2;
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
         row_buffer.push(row_map);
-        if row_buffer.len() == max_buffer_size {
+        if row_buffer.len() == buffer_size {
             process_row_buffer(
                 column_names,
                 &schema_map,
