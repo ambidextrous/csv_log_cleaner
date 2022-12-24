@@ -1,3 +1,4 @@
+use csv::Reader;
 use csv_cleaner::generate_validated_schema;
 use csv_cleaner::process_rows;
 use csv_cleaner::JsonSchema;
@@ -12,7 +13,12 @@ fn end_to_end() {
         fs::read_to_string("tests/e2e_data/test_schema.json").expect("Failed reading JSON schema");
     let json_schema: JsonSchema =
         serde_json::from_str(&schema_string).expect("Failed parsing JSON schema to struct");
-    let input_csv_path = "tests/e2e_data/test_input.csv".to_string();
+    //Mock reading the contents of tests/e2e_data/test_input.csv from stdin
+    let mock_input = "INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
+4,dog,2020-12-31,V1
+not_an_int,cat,not_a_date,V2
+an_int,weasel,a_date,V5\n";
+    let mut rdr = Reader::from_reader(mock_input.as_bytes());
     let dir = temp_dir();
     let output_dir = dir.to_str().unwrap();
     let output_csv_path = format!("{output_dir}/test_output.csv");
@@ -30,7 +36,7 @@ fn end_to_end() {
 
     // Act
     let result = process_rows(
-        &input_csv_path,
+        &mut rdr,
         &output_csv_path,
         &log_path,
         &schema_path,

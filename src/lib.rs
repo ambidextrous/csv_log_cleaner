@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use csv::Reader;
 use csv::StringRecord;
 use rustc_hash::FxHashMap as HashMap;
 use serde::Deserialize;
@@ -63,7 +64,7 @@ struct ColumnLog {
 type Record = HashMap<String, String>;
 
 pub fn process_rows(
-    input_path: &String,
+    rdr: &mut Reader<impl io::Read>,
     output_path: &String,
     log_path: &String,
     schema_path: &String,
@@ -76,12 +77,10 @@ pub fn process_rows(
     let schema_string = fs::read_to_string(schema_path)?;
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
-    let header_input_file = File::open(input_path)?;
-    let mut header_rdr = csv::Reader::from_reader(header_input_file);
     let mut wtr = csv::WriterBuilder::new()
         .delimiter(sep)
         .from_path(output_path)?;
-    let column_names = header_rdr.headers()?;
+    let column_names = &rdr.headers()?.clone();
     wtr.write_record(&column_names.clone())?;
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
     let column_logs: Vec<ColumnLog> = column_names
@@ -100,9 +99,6 @@ pub fn process_rows(
         .zip(column_logs.iter().cloned())
         .collect();
     let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
-    let mut rdr = csv::ReaderBuilder::new()
-        .delimiter(sep)
-        .from_path(input_path)?;
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
