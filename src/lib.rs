@@ -10,6 +10,11 @@ use std::io;
 use std::io::ErrorKind;
 use std::iter::Iterator;
 
+struct Constants {
+    null_vals: Vec<String>,
+    bool_strings: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 enum ColumnType {
     String,
@@ -178,6 +183,43 @@ fn process_row<'a>(
     let processed_record = StringRecord::from(processed_row);
 
     Ok(processed_record)
+}
+
+fn generate_constants() -> Constants {
+    let null_vals = vec![
+        "#N/A".to_string(),
+        "#N/A".to_string(),
+        "N/A".to_string(),
+        "#NA".to_string(),
+        "-1.#IND".to_string(),
+        "-1.#QNAN".to_string(),
+        "-NaN".to_string(),
+        "-nan".to_string(),
+        "1.#IND".to_string(),
+        "1.#QNAN".to_string(),
+        "<NA>".to_string(),
+        "N/A".to_string(),
+        "NA".to_string(),
+        "NULL".to_string(),
+        "NaN".to_string(),
+        "n/a".to_string(),
+        "nan".to_string(),
+        "null".to_string(),
+    ];
+    let bool_strings = vec![
+        "true".to_string(),
+        "1".to_string(),
+        "1.0".to_string(),
+        "yes".to_string(),
+        "false".to_string(),
+        "0.0".to_string(),
+        "0".to_string(),
+        "no".to_string(),
+    ];
+    Constants {
+        null_vals,
+        bool_strings,
+    }
 }
 
 fn jsonify_log_map_errors(log_map: HashMap<String, ColumnLog>, total_rows: &i32) -> String {
