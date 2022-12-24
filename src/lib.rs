@@ -12,7 +12,7 @@ use std::iter::Iterator;
 
 struct Constants {
     null_vals: Vec<String>,
-    bool_strings: Vec<String>,
+    bool_vals: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -72,6 +72,7 @@ pub fn process_rows(
     // Process CSV row by row in memory buffer, writing the output to disk
     // as you go.
     let mut row_count = 0;
+    let constants = generate_constants();
     let schema_string = fs::read_to_string(schema_path)?;
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
@@ -112,6 +113,7 @@ pub fn process_rows(
             row_map,
             &mut mut_log_map,
             &null_vals,
+            &constants,
         )?;
         wtr.write_record(&cleaned_row)?;
     }
@@ -130,6 +132,7 @@ fn process_row<'a>(
     row_map: HashMap<String, String>,
     log_map: &'a mut HashMap<String, ColumnLog>,
     null_vals: &Vec<String>,
+    constants: &Constants,
 ) -> Result<StringRecord, Box<dyn Error>> {
     // Process a single CSV row
     let mut processed_row = Vec::new();
@@ -141,7 +144,7 @@ fn process_row<'a>(
         let column = schema_dict.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in schema`")
         })?;
-        let processed_value = cleaned_value.process(&column);
+        let processed_value = cleaned_value.process(&column, constants);
         if processed_value != cleaned_value {
             let column_log = log_map.get(column_name).ok_or_else(|| {
                 format!("Key error, could not find column_name `{column_name}` in log_map`")
@@ -206,7 +209,7 @@ fn generate_constants() -> Constants {
         "nan".to_string(),
         "null".to_string(),
     ];
-    let bool_strings = vec![
+    let bool_vals = vec![
         "true".to_string(),
         "1".to_string(),
         "1.0".to_string(),
@@ -218,7 +221,7 @@ fn generate_constants() -> Constants {
     ];
     Constants {
         null_vals,
-        bool_strings,
+        bool_vals,
     }
 }
 
@@ -309,11 +312,11 @@ pub fn generate_validated_schema(
 }
 
 trait Process {
-    fn process(&self, column: &Column) -> Self;
+    fn process(&self, column: &Column, constants: &Constants) -> Self;
 }
 
 impl Process for String {
-    fn process(&self, column: &Column) -> Self {
+    fn process(&self, column: &Column, constants: &Constants) -> Self {
         match column.column_type {
             ColumnType::String => self.to_string(),
             ColumnType::Int => {
@@ -350,7 +353,7 @@ impl Process for String {
             }
             ColumnType::Bool => {
                 let cleaned = self;
-                if cleaned.casts_to_bool() {
+                if cleaned.casts_to_bool(constants) {
                     cleaned.to_string()
                 } else {
                     column.illegal_val_replacement.to_owned()
@@ -401,22 +404,12 @@ impl Clean for String {
 }
 
 trait CastsToBool {
-    fn casts_to_bool(&self) -> bool;
+    fn casts_to_bool(&self, constants: &Constants) -> bool;
 }
 
 impl CastsToBool for String {
-    fn casts_to_bool(&self) -> bool {
-        let bool_strings = vec![
-            "true".to_string(),
-            "1".to_string(),
-            "1.0".to_string(),
-            "yes".to_string(),
-            "false".to_string(),
-            "0.0".to_string(),
-            "0".to_string(),
-            "no".to_string(),
-        ];
-        bool_strings.contains(&self.to_lowercase())
+    fn casts_to_bool(&self, constants: &Constants) -> bool {
+        constants.bool_vals.contains(&self.to_lowercase())
     }
 }
 
@@ -573,8 +566,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -591,8 +588,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -633,8 +634,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: "%Y-%m-%d".to_string(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -669,8 +674,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -711,8 +720,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
         ];
         let legal = vec!["A".to_string(), "B".to_string()];
         let expected = vec![true, true, true, true, true, true, false];
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.casts_to_bool()).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.casts_to_bool(&constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -729,8 +742,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
