@@ -1,6 +1,7 @@
 use chrono::NaiveDate;
 use csv::Reader;
 use csv::StringRecord;
+use csv::Writer;
 use rustc_hash::FxHashMap as HashMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -99,23 +100,63 @@ pub fn process_rows(
         .zip(column_logs.iter().cloned())
         .collect();
     let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
+    let mut row_buffer = Vec::new();
+    let max_buffer_size = 2;
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
-        let cleaned_row = process_row(
+        row_buffer.push(row_map);
+        if row_buffer.len() == max_buffer_size {
+            process_row_buffer(
+                column_names,
+                &schema_map,
+                &row_buffer,
+                &mut mut_log_map,
+                &constants,
+                &mut wtr,
+            );
+            row_buffer.clear();
+        }
+    }
+    if !row_buffer.is_empty() {
+        process_row_buffer(
             column_names,
             &schema_map,
-            row_map,
+            &row_buffer,
             &mut mut_log_map,
             &constants,
-        )?;
-        wtr.write_record(&cleaned_row)?;
+            &mut wtr,
+        );
     }
     let log_map_all = jsonify_log_map(mut_log_map.clone(), &row_count);
     let log_error_message = format!("Unable to write JSON log file to `{log_path}`");
     fs::write(log_path, log_map_all).expect(&log_error_message);
     let log_map_errors = jsonify_log_map_errors(mut_log_map, &row_count);
     println!("Finished processing CSV file. Error report:\n{log_map_errors}");
+
+    Ok(())
+}
+
+fn process_row_buffer<'a>(
+    column_names: &'a StringRecord,
+    schema_dict: &'a HashMap<String, Column>,
+    row_buffer: &Vec<HashMap<String, String>>,
+    log_map: &'a mut HashMap<String, ColumnLog>,
+    constants: &Constants,
+    wtr: &'a mut Writer<impl io::Write>,
+    //) -> Result<StringRecord, Box<dyn Error>> {
+) -> Result<(), Box<dyn Error>> {
+    for row_map in row_buffer.iter() {
+        let cleaned_row = process_row(
+            column_names,
+            &schema_dict,
+            row_map.clone(),
+            log_map,
+            &constants,
+        )?;
+        wtr.write_record(&cleaned_row)?;
+        println!("row_map = {:?}", row_map.clone());
+    }
 
     Ok(())
 }

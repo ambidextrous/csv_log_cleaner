@@ -16,6 +16,8 @@ struct Args {
     log: String,
     #[clap(short = 's', long, value_parser, default_value_t = ',')]
     sep: char,
+    #[clap(short = 'b', long, value_parser, default_value_t = 100)]
+    buffer_size: usize,
 }
 
 fn run() -> Result<(), Box<dyn Error>> {

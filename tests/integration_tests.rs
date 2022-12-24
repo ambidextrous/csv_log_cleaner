@@ -35,13 +35,7 @@ an_int,weasel,a_date,V5\n";
     let sep = char_sep as u8;
 
     // Act
-    let result = process_rows(
-        &mut rdr,
-        &output_csv_path,
-        &log_path,
-        &schema_path,
-        sep,
-    );
+    let result = process_rows(&mut rdr, &output_csv_path, &log_path, &schema_path, sep);
     let output_csv =
         fs::read_to_string(output_csv_path).expect("Failed to read output CSV from temp dir");
     let output_log = fs::read_to_string(log_path).expect("Failed to read output log from temp dir");
