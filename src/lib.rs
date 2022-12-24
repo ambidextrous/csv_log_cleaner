@@ -76,7 +76,6 @@ pub fn process_rows(
     let schema_string = fs::read_to_string(schema_path)?;
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
-    let null_vals = get_null_vals();
     let header_input_file = File::open(input_path)?;
     let mut header_rdr = csv::Reader::from_reader(header_input_file);
     let mut wtr = csv::WriterBuilder::new()
@@ -112,7 +111,6 @@ pub fn process_rows(
             &schema_map,
             row_map,
             &mut mut_log_map,
-            &null_vals,
             &constants,
         )?;
         wtr.write_record(&cleaned_row)?;
@@ -131,7 +129,6 @@ fn process_row<'a>(
     schema_dict: &'a HashMap<String, Column>,
     row_map: HashMap<String, String>,
     log_map: &'a mut HashMap<String, ColumnLog>,
-    null_vals: &Vec<String>,
     constants: &Constants,
 ) -> Result<StringRecord, Box<dyn Error>> {
     // Process a single CSV row
@@ -140,7 +137,7 @@ fn process_row<'a>(
         let column_value = row_map.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in row map")
         })?;
-        let cleaned_value = column_value.clean(&null_vals);
+        let cleaned_value = column_value.clean(&constants);
         let column = schema_dict.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in schema`")
         })?;
@@ -390,12 +387,12 @@ fn get_null_vals() -> Vec<String> {
 }
 
 trait Clean {
-    fn clean(&self, null_vals: &[String]) -> Self;
+    fn clean(&self, constants: &Constants) -> Self;
 }
 
 impl Clean for String {
-    fn clean(&self, null_vals: &[String]) -> Self {
-        if null_vals.contains(self) {
+    fn clean(&self, constants: &Constants) -> Self {
+        if constants.null_vals.contains(self) {
             String::new()
         } else {
             self.to_string()
@@ -502,10 +499,11 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
         let input = vec!["NULL".to_string(), String::new(), " dog\t".to_string()];
         let expected = vec![String::new(), String::new(), " dog\t".to_string()];
         let null_vals = get_null_vals();
+        let constants = generate_constants();
         // Act
         let result = input
             .iter()
-            .map(|x| x.clean(&null_vals))
+            .map(|x| x.clean(&constants))
             .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
