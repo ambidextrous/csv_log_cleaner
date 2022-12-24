@@ -8,8 +8,6 @@ use std::process;
 #[clap(author, version, about, long_about = None)]
 struct Args {
     // Set up CLI
-    #[clap(short = 'i', long, value_parser)]
-    input: String,
     #[clap(short = 'o', long, value_parser)]
     output: String,
     #[clap(short = 'j', long, value_parser)]
