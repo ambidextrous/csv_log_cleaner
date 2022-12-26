@@ -34,6 +34,10 @@ an_int,weasel,a_date,V5\n";
     let char_sep = ',';
     let sep = char_sep as u8;
     let buffer_size = 2;
+    let expected_row_1 = ",weasel,,V1\n";
+    let expected_row_2 = "4,dog,2020-12-31,V1\n";
+    let expected_row_3 = ",cat,,V2\n";
+    let expected_len = expected_row_1.len() + expected_row_2.len() + expected_row_3.len();
 
     // Act
     let result = process_rows(
@@ -53,7 +57,10 @@ an_int,weasel,a_date,V5\n";
     println!("{}", expected_output_csv);
     println!("actual:");
     println!("{}", output_csv);
-    assert_eq!(output_csv, expected_output_csv);
+    assert!(output_csv.contains(expected_row_1));
+    assert!(output_csv.contains(expected_row_2));
+    assert!(output_csv.contains(expected_row_3));
+    assert_eq!(expected_len, output_csv.len());
     println!("expected:");
     println!("{}", expected_log);
     println!("actual:");

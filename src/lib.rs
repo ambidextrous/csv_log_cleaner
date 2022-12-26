@@ -2,6 +2,7 @@ use chrono::NaiveDate;
 use csv::Reader;
 use csv::StringRecord;
 use csv::Writer;
+use rayon::prelude::*;
 use rustc_hash::FxHashMap as HashMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -11,7 +12,11 @@ use std::fs::File;
 use std::io;
 use std::io::ErrorKind;
 use std::iter::Iterator;
+use std::marker::Send;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
+#[derive(Debug, Clone)]
 struct Constants {
     null_vals: Vec<String>,
     bool_vals: Vec<String>,
@@ -82,8 +87,9 @@ pub fn process_rows(
     let mut wtr = csv::WriterBuilder::new()
         .delimiter(sep)
         .from_path(output_path)?;
-    let column_names = &rdr.headers()?.clone();
+    let column_names = rdr.headers()?.clone();
     wtr.write_record(&column_names.clone())?;
+    let locked_wtr = Arc::new(Mutex::new(wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
     let column_logs: Vec<ColumnLog> = column_names
         .clone()
@@ -102,30 +108,43 @@ pub fn process_rows(
         .collect();
     let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
     let mut row_buffer = Vec::new();
+    let num_threads = 4;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        .unwrap();
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
         row_buffer.push(row_map);
         if row_buffer.len() == buffer_size {
-            process_row_buffer(
-                column_names,
-                &schema_map,
-                &row_buffer,
-                &mut mut_log_map,
-                &constants,
-                &mut wtr,
-            );
+            let cloned_row_buffer = row_buffer.clone();
+            let cloned_schema_map = schema_map.clone();
+            let cloned_column_names = column_names.clone();
+            let mut cloned_mut_log_map = mut_log_map.clone();
+            let cloned_constants = constants.clone();
+            let cloned_locked_wtr = Arc::clone(&locked_wtr);
+            pool.spawn(move || {
+                process_row_buffer(
+                    &cloned_column_names,
+                    &cloned_schema_map,
+                    &cloned_row_buffer,
+                    &mut cloned_mut_log_map,
+                    &cloned_constants,
+                    cloned_locked_wtr,
+                );
+            });
             row_buffer.clear();
         }
     }
     if !row_buffer.is_empty() {
         process_row_buffer(
-            column_names,
+            &column_names,
             &schema_map,
             &row_buffer,
             &mut mut_log_map,
             &constants,
-            &mut wtr,
+            locked_wtr,
         );
     }
     let log_map_all = jsonify_log_map(mut_log_map.clone(), &row_count);
@@ -143,9 +162,9 @@ fn process_row_buffer<'a>(
     row_buffer: &Vec<HashMap<String, String>>,
     log_map: &'a mut HashMap<String, ColumnLog>,
     constants: &Constants,
-    wtr: &'a mut Writer<impl io::Write>,
-    //) -> Result<StringRecord, Box<dyn Error>> {
+    locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
 ) -> Result<(), Box<dyn Error>> {
+    let mut cleaned_rows = Vec::new();
     for row_map in row_buffer.iter() {
         let cleaned_row = process_row(
             column_names,
@@ -154,8 +173,13 @@ fn process_row_buffer<'a>(
             log_map,
             &constants,
         )?;
-        wtr.write_record(&cleaned_row)?;
-        println!("row_map = {:?}", row_map.clone());
+        cleaned_rows.push(cleaned_row);
+    }
+    let mut wtr = locked_wtr.lock().unwrap();
+    for cleaned_row in cleaned_rows.iter() {
+        // TODO: remove once thoroough test coverage
+        println!("{:?}", cleaned_row);
+        wtr.write_record(cleaned_row)?;
     }
 
     Ok(())
@@ -168,7 +192,6 @@ fn process_row<'a>(
     log_map: &'a mut HashMap<String, ColumnLog>,
     constants: &Constants,
 ) -> Result<StringRecord, Box<dyn Error>> {
-    // Process a single CSV row
     let mut processed_row = Vec::new();
     for column_name in ordered_column_names {
         let column_value = row_map.get(column_name).ok_or_else(|| {
