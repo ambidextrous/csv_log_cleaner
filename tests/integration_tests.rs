@@ -34,10 +34,12 @@ an_int,weasel,a_date,V5\n";
     let char_sep = ',';
     let sep = char_sep as u8;
     let buffer_size = 2;
+    let expected_header = "INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN\n";
     let expected_row_1 = ",weasel,,V1\n";
     let expected_row_2 = "4,dog,2020-12-31,V1\n";
     let expected_row_3 = ",cat,,V2\n";
-    let expected_len = expected_row_1.len() + expected_row_2.len() + expected_row_3.len();
+    let expected_len =
+        expected_header.len() + expected_row_1.len() + expected_row_2.len() + expected_row_3.len();
 
     // Act
     let result = process_rows(
@@ -57,6 +59,7 @@ an_int,weasel,a_date,V5\n";
     println!("{}", expected_output_csv);
     println!("actual:");
     println!("{}", output_csv);
+    assert!(output_csv.contains(expected_header));
     assert!(output_csv.contains(expected_row_1));
     assert!(output_csv.contains(expected_row_2));
     assert!(output_csv.contains(expected_row_3));
