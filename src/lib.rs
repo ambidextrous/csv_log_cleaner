@@ -245,6 +245,41 @@ fn process_row<'a>(
     Ok(processed_record)
 }
 
+impl ColumnLog {
+    fn update(&mut self, other: &ColumnLog) {
+        assert!(self.name == other.name);
+        let new_invalid_count = self.invalid_count + other.invalid_count;
+        let new_max = match (self.max_invalid.clone(), other.max_invalid.clone()) {
+            (Some(x), Some(y)) => {
+                if x > y {
+                    Some(x)
+                } else {
+                    Some(y)
+                }
+            }
+            (Some(x), None) => Some(x),
+            (None, Some(y)) => Some(y),
+            _ => None,
+        };
+        let new_min = match (self.min_invalid.clone(), other.min_invalid.clone()) {
+            (Some(x), Some(y)) => {
+                if x < y {
+                    Some(x)
+                } else {
+                    Some(y)
+                }
+            }
+            (Some(x), None) => Some(x),
+            (None, Some(y)) => Some(y),
+            _ => None,
+        };
+
+        self.invalid_count = new_invalid_count;
+        self.max_invalid = new_max;
+        self.min_invalid = new_min;
+    }
+}
+
 fn generate_constants() -> Constants {
     let null_vals = vec![
         "#N/A".to_string(),
