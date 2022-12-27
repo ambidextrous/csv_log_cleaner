@@ -2,19 +2,18 @@ use chrono::NaiveDate;
 use csv::Reader;
 use csv::StringRecord;
 use csv::Writer;
-use rayon::prelude::*;
 use rustc_hash::FxHashMap as HashMap;
 use serde::Deserialize;
 use serde::Serialize;
 use std::error::Error;
 use std::fs;
-use std::fs::File;
 use std::io;
 use std::io::ErrorKind;
 use std::iter::Iterator;
 use std::marker::Send;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 #[derive(Debug, Clone)]
 struct Constants {
@@ -79,6 +78,10 @@ pub fn process_rows(
 ) -> Result<(), Box<dyn Error>> {
     // Process CSV row by row in memory buffer, writing the output to disk
     // as you go.
+    let (tx, rx): (
+        Sender<HashMap<String, ColumnLog>>,
+        Receiver<HashMap<String, ColumnLog>>,
+    ) = mpsc::channel();
     let mut row_count = 0;
     let constants = generate_constants();
     let schema_string = fs::read_to_string(schema_path)?;
@@ -91,66 +94,76 @@ pub fn process_rows(
     wtr.write_record(&column_names.clone())?;
     let locked_wtr = Arc::new(Mutex::new(wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
-    let column_logs: Vec<ColumnLog> = column_names
-        .clone()
-        .into_iter()
-        .map(|x| ColumnLog {
-            name: x.to_string(),
-            invalid_count: 0,
-            max_invalid: None,
-            min_invalid: None,
-        })
-        .collect();
-    let column_log_tuples: Vec<(String, ColumnLog)> = column_string_names
-        .clone()
-        .into_iter()
-        .zip(column_logs.iter().cloned())
-        .collect();
-    let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
+    let mut mut_log_map = generate_column_log_map(&column_names, &column_string_names);
+    let locked_mut_log_map = Arc::new(Mutex::new(mut_log_map));
     let mut row_buffer = Vec::new();
     let num_threads = 4;
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()
         .unwrap();
+    let mut job_counter = 0;
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
         row_buffer.push(row_map);
         if row_buffer.len() == buffer_size {
+            job_counter += 1;
             let cloned_row_buffer = row_buffer.clone();
             let cloned_schema_map = schema_map.clone();
             let cloned_column_names = column_names.clone();
-            let mut cloned_mut_log_map = mut_log_map.clone();
+            let cloned_locked_mut_log_map = Arc::clone(&locked_mut_log_map);
             let cloned_constants = constants.clone();
             let cloned_locked_wtr = Arc::clone(&locked_wtr);
+            let buffer_log_map = generate_column_log_map(&column_names, &column_string_names);
+            let cloned_column_string_names = column_string_names.clone();
+            let thread_tx = tx.clone();
             pool.spawn(move || {
                 process_row_buffer(
                     &cloned_column_names,
                     &cloned_schema_map,
                     &cloned_row_buffer,
-                    &mut cloned_mut_log_map,
                     &cloned_constants,
                     cloned_locked_wtr,
+                    &cloned_column_string_names,
+                    thread_tx,
                 );
             });
             row_buffer.clear();
         }
     }
+    let cloned_locked_mut_log_map = Arc::clone(&locked_mut_log_map);
+    let buffer_log_map = generate_column_log_map(&column_names, &column_string_names);
+    let thread_tx = tx.clone();
     if !row_buffer.is_empty() {
+        job_counter += 1;
         process_row_buffer(
             &column_names,
             &schema_map,
             &row_buffer,
-            &mut mut_log_map,
             &constants,
             locked_wtr,
+            &column_string_names,
+            thread_tx,
         );
     }
-    let log_map_all = jsonify_log_map(mut_log_map.clone(), &row_count);
+    let mut combined_log_map = generate_column_log_map(&column_names, &column_string_names);
+    for log_map in rx.iter() {
+        job_counter -= 1;
+        for (column_name, column_log) in log_map {
+            let unwrapped_log = combined_log_map.get(&column_name.clone()).unwrap();
+            let updated_log = unwrapped_log.update(&column_log);
+            combined_log_map.insert(column_name.clone(), updated_log);
+        }
+        if job_counter < 1 {
+            break;
+        }
+    }
+    let unlocked_mut_log_map = locked_mut_log_map.lock().unwrap();
+    let log_map_all = jsonify_log_map(combined_log_map.clone(), &row_count);
     let log_error_message = format!("Unable to write JSON log file to `{log_path}`");
     fs::write(log_path, log_map_all).expect(&log_error_message);
-    let log_map_errors = jsonify_log_map_errors(mut_log_map, &row_count);
+    let log_map_errors = jsonify_log_map_errors(combined_log_map.clone(), &row_count);
     println!("Finished processing CSV file. Error report:\n{log_map_errors}");
 
     Ok(())
@@ -160,27 +173,28 @@ fn process_row_buffer<'a>(
     column_names: &'a StringRecord,
     schema_dict: &'a HashMap<String, Column>,
     row_buffer: &Vec<HashMap<String, String>>,
-    log_map: &'a mut HashMap<String, ColumnLog>,
     constants: &Constants,
     locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
+    column_string_names: &Vec<String>,
+    tx: Sender<HashMap<String, ColumnLog>>,
 ) -> Result<(), Box<dyn Error>> {
+    let mut buffer_log_map = generate_column_log_map(column_names, column_string_names);
     let mut cleaned_rows = Vec::new();
     for row_map in row_buffer.iter() {
         let cleaned_row = process_row(
             column_names,
             &schema_dict,
             row_map.clone(),
-            log_map,
+            &mut buffer_log_map,
             &constants,
         )?;
         cleaned_rows.push(cleaned_row);
     }
     let mut wtr = locked_wtr.lock().unwrap();
     for cleaned_row in cleaned_rows.iter() {
-        // TODO: remove once thoroough test coverage
-        println!("{:?}", cleaned_row);
         wtr.write_record(cleaned_row)?;
     }
+    tx.send(buffer_log_map).unwrap();
 
     Ok(())
 }
@@ -245,8 +259,31 @@ fn process_row<'a>(
     Ok(processed_record)
 }
 
+fn generate_column_log_map(
+    column_names: &StringRecord,
+    column_string_names: &Vec<String>,
+) -> HashMap<String, ColumnLog> {
+    let column_logs: Vec<ColumnLog> = column_names
+        .clone()
+        .into_iter()
+        .map(|x| ColumnLog {
+            name: x.to_string(),
+            invalid_count: 0,
+            max_invalid: None,
+            min_invalid: None,
+        })
+        .collect();
+    let column_log_tuples: Vec<(String, ColumnLog)> = column_string_names
+        .clone()
+        .into_iter()
+        .zip(column_logs.iter().cloned())
+        .collect();
+    let mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
+    mut_log_map
+}
+
 impl ColumnLog {
-    fn update(&mut self, other: &ColumnLog) {
+    fn update(&self, other: &ColumnLog) -> ColumnLog {
         assert!(self.name == other.name);
         let new_invalid_count = self.invalid_count + other.invalid_count;
         let new_max = match (self.max_invalid.clone(), other.max_invalid.clone()) {
@@ -274,9 +311,12 @@ impl ColumnLog {
             _ => None,
         };
 
-        self.invalid_count = new_invalid_count;
-        self.max_invalid = new_max;
-        self.min_invalid = new_min;
+        ColumnLog {
+            name: self.name.clone(),
+            invalid_count: new_invalid_count,
+            max_invalid: new_max,
+            min_invalid: new_min,
+        }
     }
 }
 
