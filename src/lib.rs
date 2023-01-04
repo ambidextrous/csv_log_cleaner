@@ -88,17 +88,12 @@ pub fn process_rows(
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
     let column_names = rdr.headers()?.clone();
-    wtr.write_record(&column_names.clone())?;
+    wtr.write_record(&column_names)?;
     let locked_wtr = Arc::new(Mutex::new(wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
     let mut row_buffer = Vec::new();
     let core_count = num_cpus::get();
-    let num_threads;
-    if core_count == 1 {
-        num_threads = 1;
-    } else {
-        num_threads = core_count - 1;
-    }
+    let num_threads = if core_count == 1 { 1 } else { core_count - 1 };
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()
@@ -131,7 +126,7 @@ pub fn process_rows(
             row_buffer.clear();
         }
     }
-    let thread_tx = tx.clone();
+    let thread_tx = tx;
     if !row_buffer.is_empty() {
         job_counter += 1;
         process_row_buffer(
@@ -168,10 +163,10 @@ pub fn process_rows(
 fn process_row_buffer<'a>(
     column_names: &'a StringRecord,
     schema_dict: &'a HashMap<String, Column>,
-    row_buffer: &Vec<HashMap<String, String>>,
+    row_buffer: &[HashMap<String, String>],
     constants: &Constants,
     locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
-    column_string_names: &Vec<String>,
+    column_string_names: &[String],
     tx: Sender<HashMap<String, ColumnLog>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut buffer_log_map = generate_column_log_map(column_names, column_string_names);
@@ -179,10 +174,10 @@ fn process_row_buffer<'a>(
     for row_map in row_buffer.iter() {
         let cleaned_row = process_row(
             column_names,
-            &schema_dict,
+            schema_dict,
             row_map.clone(),
             &mut buffer_log_map,
-            &constants,
+            constants,
         )?;
         cleaned_rows.push(cleaned_row);
     }
