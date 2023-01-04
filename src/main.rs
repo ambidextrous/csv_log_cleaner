@@ -24,7 +24,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let schema_path = args.schema;
     let byte_sep = args.sep as u8;
     let mut rdr = csv::Reader::from_reader(io::stdin());
-    let mut wtr = csv::WriterBuilder::new()
+    let wtr = csv::WriterBuilder::new()
         .delimiter(byte_sep)
         .from_writer(io::stdout());
     let result = process_rows(
@@ -32,7 +32,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         wtr,
         &log_path,
         &schema_path,
-        byte_sep,
         args.buffer_size,
     );
 

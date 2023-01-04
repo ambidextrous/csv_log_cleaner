@@ -74,7 +74,6 @@ pub fn process_rows(
     mut wtr: Writer<impl io::Write + std::marker::Send + std::marker::Sync + 'static>,
     log_path: &String,
     schema_path: &String,
-    sep: u8,
     buffer_size: usize,
 ) -> Result<(), Box<dyn Error>> {
     // Process CSV row by row in memory buffer, writing the output to disk
@@ -92,8 +91,6 @@ pub fn process_rows(
     wtr.write_record(&column_names.clone())?;
     let locked_wtr = Arc::new(Mutex::new(wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
-    let mut mut_log_map = generate_column_log_map(&column_names, &column_string_names);
-    let locked_mut_log_map = Arc::new(Mutex::new(mut_log_map));
     let mut row_buffer = Vec::new();
     let core_count = num_cpus::get();
     let num_threads;
@@ -116,10 +113,8 @@ pub fn process_rows(
             let cloned_row_buffer = row_buffer.clone();
             let cloned_schema_map = schema_map.clone();
             let cloned_column_names = column_names.clone();
-            let cloned_locked_mut_log_map = Arc::clone(&locked_mut_log_map);
             let cloned_constants = constants.clone();
             let cloned_locked_wtr = Arc::clone(&locked_wtr);
-            let buffer_log_map = generate_column_log_map(&column_names, &column_string_names);
             let cloned_column_string_names = column_string_names.clone();
             let thread_tx = tx.clone();
             pool.spawn(move || {
@@ -136,8 +131,6 @@ pub fn process_rows(
             row_buffer.clear();
         }
     }
-    let cloned_locked_mut_log_map = Arc::clone(&locked_mut_log_map);
-    let buffer_log_map = generate_column_log_map(&column_names, &column_string_names);
     let thread_tx = tx.clone();
     if !row_buffer.is_empty() {
         job_counter += 1;
@@ -163,7 +156,6 @@ pub fn process_rows(
             break;
         }
     }
-    let unlocked_mut_log_map = locked_mut_log_map.lock().unwrap();
     let log_map_all = jsonify_log_map(combined_log_map.clone(), &row_count);
     let log_error_message = format!("Unable to write JSON log file to `{log_path}`");
     fs::write(log_path, log_map_all).expect(&log_error_message);

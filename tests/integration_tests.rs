@@ -80,7 +80,7 @@ an_int,weasel,a_date,V5\n"
         + (expected_row_1.len() + expected_row_2.len() + expected_row_3.len()) * n_body_repetitions;
 
     // Act
-    let result = process_rows(&mut rdr, wtr, &log_path, &schema_path, sep, buffer_size);
+    let result = process_rows(&mut rdr, wtr, &log_path, &schema_path, buffer_size);
     let output_csv =
         fs::read_to_string(output_csv_path).expect("Failed to read output CSV from temp dir");
     let output_log = fs::read_to_string(log_path).expect("Failed to read output log from temp dir");
