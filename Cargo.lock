@@ -190,6 +190,7 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
+ "num_cpus",
  "rayon",
  "rustc-hash",
  "serde",

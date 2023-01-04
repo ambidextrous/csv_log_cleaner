@@ -2,6 +2,7 @@ use chrono::NaiveDate;
 use csv::Reader;
 use csv::StringRecord;
 use csv::Writer;
+use num_cpus;
 use rustc_hash::FxHashMap as HashMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -97,7 +98,13 @@ pub fn process_rows(
     let mut mut_log_map = generate_column_log_map(&column_names, &column_string_names);
     let locked_mut_log_map = Arc::new(Mutex::new(mut_log_map));
     let mut row_buffer = Vec::new();
-    let num_threads = 4;
+    let core_count = num_cpus::get();
+    let num_threads;
+    if core_count == 1 {
+        num_threads = 1;
+    } else {
+        num_threads = core_count - 1;
+    }
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()

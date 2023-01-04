@@ -13,4 +13,5 @@ csv = "1.1"
 clap = { version = "3.2.21", features = ["derive"] }
 rustc-hash = "1.1.0"
 rayon = "1.6.1"
+num_cpus = "1.15.0"
 
