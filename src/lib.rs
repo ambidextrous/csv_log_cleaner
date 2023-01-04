@@ -207,11 +207,11 @@ fn process_row<'a>(
         let column_value = row_map.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in row map")
         })?;
-        let cleaned_value = column_value.clean(&constants);
+        let cleaned_value = column_value.clean(constants);
         let column = schema_dict.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in schema`")
         })?;
-        let processed_value = cleaned_value.process(&column, constants);
+        let processed_value = cleaned_value.process(column, constants);
         if processed_value != cleaned_value {
             let column_log = log_map.get(column_name).ok_or_else(|| {
                 format!("Key error, could not find column_name `{column_name}` in log_map`")
@@ -257,7 +257,7 @@ fn process_row<'a>(
 
 fn generate_column_log_map(
     column_names: &StringRecord,
-    column_string_names: &Vec<String>,
+    column_string_names: &[String],
 ) -> HashMap<String, ColumnLog> {
     let column_logs: Vec<ColumnLog> = column_names
         .clone()
@@ -269,12 +269,11 @@ fn generate_column_log_map(
             min_invalid: None,
         })
         .collect();
-    let column_log_tuples: Vec<(String, ColumnLog)> = column_string_names
-        .clone()
+    let mut_log_map: HashMap<String, ColumnLog> = column_string_names
+        .to_owned()
         .into_iter()
         .zip(column_logs.iter().cloned())
         .collect();
-    let mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
     mut_log_map
 }
 
@@ -383,7 +382,7 @@ fn jsonify_log_map_all_or_errors(
                     min_val = x.clone();
                 }
             }
-            let invalid_row_count = column_log.invalid_count.clone();
+            let invalid_row_count = column_log.invalid_count;
             let col_string = format!("{{\n\t\t\t\"column_name\": \"{column_name}\",\n\t\t\t\"invalid_row_count\": {invalid_row_count},\n\t\t\t\"max_illegal_val\": \"{max_val}\",\n\t\t\t\"min_illegal_val\": \"{min_val}\"\n\t\t}}");
             if is_first_row {
                 combined_string = format!("{combined_string}{col_string}");
@@ -408,14 +407,14 @@ pub fn generate_validated_schema(
             column_type: column.column_type.clone(),
             illegal_val_replacement: column
                 .illegal_val_replacement
-                .unwrap_or(empty_string.clone()),
-            legal_vals: column.legal_vals.unwrap_or(empty_vec.clone()),
-            format: column.format.unwrap_or(empty_string.clone()),
+                .unwrap_or_else(|| empty_string.clone()),
+            legal_vals: column.legal_vals.unwrap_or_else(|| empty_vec.clone()),
+            format: column.format.unwrap_or_else(|| empty_string.clone()),
         };
 
         match column.column_type {
             ColumnType::Date => {
-                if new_col.format.len() == 0 {
+                if new_col.format.is_empty() {
                     let custom_error = io::Error::new(
                         ErrorKind::Other,
                         "Missing required `format` string value for Date column",
@@ -424,7 +423,7 @@ pub fn generate_validated_schema(
                 }
             }
             ColumnType::Enum => {
-                if new_col.legal_vals.len() == 0 {
+                if new_col.legal_vals.is_empty() {
                     let custom_error = io::Error::new(
                         ErrorKind::Other,
                         "Missing required `legal_vals` string list value for Enum column",
@@ -450,7 +449,7 @@ impl Process for String {
             ColumnType::Int => {
                 let cleaned = self.de_pseudofloat();
                 if cleaned.casts_to_int() {
-                    cleaned.to_string()
+                    cleaned
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
@@ -552,11 +551,11 @@ impl CastsToEnum for String {
 }
 
 trait CastsToDate {
-    fn casts_to_date(&self, format: &String) -> bool;
+    fn casts_to_date(&self, format: &str) -> bool;
 }
 
 impl CastsToDate for String {
-    fn casts_to_date(&self, format: &String) -> bool {
+    fn casts_to_date(&self, format: &str) -> bool {
         NaiveDate::parse_from_str(self, format).is_ok()
     }
 }

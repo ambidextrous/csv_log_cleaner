@@ -27,15 +27,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let wtr = csv::WriterBuilder::new()
         .delimiter(byte_sep)
         .from_writer(io::stdout());
-    let result = process_rows(
-        &mut rdr,
-        wtr,
-        &log_path,
-        &schema_path,
-        args.buffer_size,
-    );
-
-    result
+    process_rows(&mut rdr, wtr, &log_path, &schema_path, args.buffer_size)
 }
 
 fn main() {
