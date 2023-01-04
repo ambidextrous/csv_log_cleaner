@@ -71,7 +71,7 @@ type Record = HashMap<String, String>;
 
 pub fn process_rows(
     rdr: &mut Reader<impl io::Read>,
-    output_path: &String,
+    mut wtr: Writer<impl io::Write + std::marker::Send + std::marker::Sync + 'static>,
     log_path: &String,
     schema_path: &String,
     sep: u8,
@@ -88,9 +88,6 @@ pub fn process_rows(
     let schema_string = fs::read_to_string(schema_path)?;
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
-    let mut wtr = csv::WriterBuilder::new()
-        .delimiter(sep)
-        .from_path(output_path)?;
     let column_names = rdr.headers()?.clone();
     wtr.write_record(&column_names.clone())?;
     let locked_wtr = Arc::new(Mutex::new(wtr));

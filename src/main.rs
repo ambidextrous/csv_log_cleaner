@@ -8,8 +8,6 @@ use std::process;
 #[clap(author, version, about, long_about = None)]
 struct Args {
     // Set up CLI
-    #[clap(short = 'o', long, value_parser)]
-    output: String,
     #[clap(short = 'j', long, value_parser)]
     schema: String,
     #[clap(short = 'l', long, value_parser)]
@@ -22,14 +20,16 @@ struct Args {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let output_csv_path = args.output;
     let log_path = args.log;
     let schema_path = args.schema;
     let byte_sep = args.sep as u8;
     let mut rdr = csv::Reader::from_reader(io::stdin());
+    let mut wtr = csv::WriterBuilder::new()
+        .delimiter(byte_sep)
+        .from_writer(io::stdout());
     let result = process_rows(
         &mut rdr,
-        &output_csv_path,
+        wtr,
         &log_path,
         &schema_path,
         byte_sep,
