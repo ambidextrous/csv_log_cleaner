@@ -154,7 +154,7 @@ pub fn process_rows(
     let log_error_message = format!("Unable to write JSON log file to `{log_path}`");
     fs::write(log_path, log_map_all).expect(&log_error_message);
     let log_map_errors = jsonify_log_map_errors(combined_log_map.clone(), &row_count);
-    println!("Finished processing CSV file. Error report:\n{log_map_errors}");
+    eprintln!("Finished processing CSV file. Error report:\n{log_map_errors}");
 
     Ok(())
 }

@@ -120,14 +120,23 @@ and write a JSON log file indicating which data has been lost during the cleanin
 - Only supports UTF-8-encoded input data (consider using [`iconv`](https://linux.die.net/man/1/iconv) or similar tools to convert non-UTF-8 data to the required encoding as part of a pipeline)
 - Row output will generally not match row output order, due to individual rows being processed separately across multiple threads.
 
-# Building from Source
+## Building from Source
+
+### Cargo
 
 To build and run tests:
 ```
 cargo test
 ```
-To build and run the tool from source using `cargo`:
-
+To make a (quick to compile, slow to run) debug build and run it:
 ```
-cargo --release -- input.csv > csv_cleaner -j schema.json -l log_file.json > output.csv 
+cat test_input.csv | cargo run -- -j test_schema.json -l test_log.json > test_output.csv
+```
+To make a (slow to compile, quick to run) release build:
+```
+cargo build --release
+```
+To run the relase build:
+```
+cat test_input.csv | target/release/csv_cleaner -j test_schema.json -l test_log.json > test_output.csv
 ```
