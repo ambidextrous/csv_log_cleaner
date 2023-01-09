@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```
-input.csv > csv_cleaner -j schema.json -l log_file.json > output.csv 
+cat input.csv | csv_cleaner -j schema.json -l log.json > output.csv
 ```
 
 ## Description
@@ -119,6 +119,7 @@ and write a JSON log file indicating which data has been lost during the cleanin
 
 - Only supports UTF-8-encoded input data (consider using [`iconv`](https://linux.die.net/man/1/iconv) or similar tools to convert non-UTF-8 data to the required encoding as part of a pipeline)
 - Row output will generally not match row output order, due to individual rows being processed separately across multiple threads.
+- Uses empty string values as NULLs across all column types (meaning that other recognised NULL values - such as `<NA>` and `null` - will be converted to empty strings in output, and that all empty string values will be treated as NULL)
 
 ## Building from Source
 
