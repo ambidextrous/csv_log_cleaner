@@ -144,7 +144,7 @@ pub fn process_rows(
             let cloned_column_string_names = column_string_names.clone();
             let thread_tx = tx.clone();
             pool.spawn(move || {
-                process_row_buffer(
+                process_row_buffer_errors(
                     &cloned_column_names,
                     &cloned_schema_map,
                     &cloned_row_buffer,
@@ -152,7 +152,8 @@ pub fn process_rows(
                     cloned_locked_wtr,
                     &cloned_column_string_names,
                     thread_tx,
-                );
+                )
+                .expect("Called function to panic before error bubbles up this far");
             });
             row_buffer.clear();
         }
@@ -168,7 +169,7 @@ pub fn process_rows(
             locked_wtr,
             &column_string_names,
             thread_tx,
-        );
+        )?;
     }
     let mut combined_log_map = generate_column_log_map(&column_names, &column_string_names);
     for log_map in rx.iter() {
@@ -279,6 +280,32 @@ fn process_row<'a>(
     let processed_record = StringRecord::from(processed_row);
 
     Ok(processed_record)
+}
+
+fn process_row_buffer_errors<'a>(
+    column_names: &'a StringRecord,
+    schema_dict: &'a HashMap<String, Column>,
+    row_buffer: &[HashMap<String, String>],
+    constants: &Constants,
+    locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
+    column_string_names: &[String],
+    tx: Sender<HashMap<String, ColumnLog>>,
+) -> Result<(), Box<dyn Error>> {
+    let buffer_processing_result = process_row_buffer(
+        &column_names,
+        &schema_dict,
+        &row_buffer,
+        &constants,
+        locked_wtr,
+        &column_string_names,
+        tx,
+    );
+    if let Err(err) = buffer_processing_result {
+        let error_message = err.to_string();
+        panic!("Unrecoverable error in thread pool: {}", error_message);
+    }
+
+    Ok(())
 }
 
 fn are_equal_spec_and_csv_columns(
