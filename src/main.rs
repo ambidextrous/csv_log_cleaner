@@ -27,12 +27,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     let wtr = csv::WriterBuilder::new()
         .delimiter(byte_sep)
         .from_writer(io::stdout());
-    process_rows(&mut rdr, wtr, &log_path, &schema_path, args.buffer_size)
+    process_rows(&mut rdr, wtr, &log_path, &schema_path, args.buffer_size)?;
+
+    Ok(())
 }
 
 fn main() {
     if let Err(err) = run() {
-        println!("{}", err);
+        eprintln!("Fatal {}, exiting processes with code 1", err);
         process::exit(1);
     }
 }

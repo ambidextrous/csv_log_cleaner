@@ -14,6 +14,7 @@ use std::marker::Send;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::vec::Vec;
 
 #[derive(Debug, Clone)]
 struct Constants {
@@ -68,6 +69,31 @@ struct ColumnLog {
 
 type Record = HashMap<String, String>;
 
+#[derive(Debug)]
+struct CSVCleaningError {
+    message: String,
+}
+
+impl CSVCleaningError {
+    fn new(message: &str) -> CSVCleaningError {
+        CSVCleaningError {
+            message: message.to_string(),
+        }
+    }
+}
+
+impl Error for CSVCleaningError {
+    fn description(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for CSVCleaningError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 pub fn process_rows(
     rdr: &mut Reader<impl io::Read>,
     mut wtr: Writer<impl io::Write + std::marker::Send + std::marker::Sync + 'static>,
@@ -87,6 +113,12 @@ pub fn process_rows(
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
     let column_names = rdr.headers()?.clone();
+    let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
+    if !spec_and_csv_columns_match {
+        return Err(Box::new(CSVCleaningError::new(
+            "Error: CSV columns and JSON spec columns do not match",
+        )));
+    }
     wtr.write_record(&column_names)?;
     let locked_wtr = Arc::new(Mutex::new(wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
@@ -247,6 +279,20 @@ fn process_row<'a>(
     let processed_record = StringRecord::from(processed_row);
 
     Ok(processed_record)
+}
+
+fn are_equal_spec_and_csv_columns(
+    csv_columns_record: &StringRecord,
+    spec: &HashMap<String, Column>,
+) -> bool {
+    let mut csv_columns: Vec<String> = csv_columns_record
+        .iter()
+        .map(|field| field.to_string())
+        .collect();
+    let mut spec_columns: Vec<String> = spec.keys().cloned().collect();
+    csv_columns.sort();
+    spec_columns.sort();
+    csv_columns == spec_columns
 }
 
 fn generate_column_log_map(
