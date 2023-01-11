@@ -157,7 +157,7 @@ pub fn process_rows(
                     thread_tx,
                     thread_error_tx,
                 )
-                .expect("Called function to panic before error bubbles up this far");
+                .expect("Called function to deal with error before can bubble up this far");
             });
             row_buffer.clear();
         }
