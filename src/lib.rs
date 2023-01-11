@@ -107,6 +107,8 @@ pub fn process_rows(
         Sender<HashMap<String, ColumnLog>>,
         Receiver<HashMap<String, ColumnLog>>,
     ) = mpsc::channel();
+    let (error_tx, error_rx): (Sender<Result<(), String>>, Receiver<Result<(), String>>) =
+        mpsc::channel();
     let mut row_count = 0;
     let constants = generate_constants();
     let schema_string = fs::read_to_string(schema_path)?;
@@ -143,6 +145,7 @@ pub fn process_rows(
             let cloned_locked_wtr = Arc::clone(&locked_wtr);
             let cloned_column_string_names = column_string_names.clone();
             let thread_tx = tx.clone();
+            let thread_error_tx = error_tx.clone();
             pool.spawn(move || {
                 process_row_buffer_errors(
                     &cloned_column_names,
@@ -152,10 +155,14 @@ pub fn process_rows(
                     cloned_locked_wtr,
                     &cloned_column_string_names,
                     thread_tx,
+                    thread_error_tx,
                 )
                 .expect("Called function to panic before error bubbles up this far");
             });
             row_buffer.clear();
+        }
+        for potential_error in error_rx.try_iter() {
+            potential_error?;
         }
     }
     let thread_tx = tx;
@@ -182,6 +189,9 @@ pub fn process_rows(
         if job_counter < 1 {
             break;
         }
+    }
+    for potential_error in error_rx.try_iter() {
+        potential_error?;
     }
     let log_map_all = jsonify_log_map(combined_log_map.clone(), &row_count);
     let log_error_message = format!("Unable to write JSON log file to `{log_path}`");
@@ -290,6 +300,7 @@ fn process_row_buffer_errors<'a>(
     locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
     column_string_names: &[String],
     tx: Sender<HashMap<String, ColumnLog>>,
+    error_tx: Sender<Result<(), String>>,
 ) -> Result<(), Box<dyn Error>> {
     let buffer_processing_result = process_row_buffer(
         &column_names,
@@ -301,8 +312,9 @@ fn process_row_buffer_errors<'a>(
         tx,
     );
     if let Err(err) = buffer_processing_result {
-        let error_message = err.to_string();
-        panic!("Unrecoverable error in thread pool: {}", error_message);
+        // Can't send Box<dyn Error>> between threads, so convert e 
+        // to String before sending through channel
+        error_tx.send(Err(err.to_string())).unwrap();
     }
 
     Ok(())
