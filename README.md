@@ -164,12 +164,12 @@ The type schema must be a JSON file, of the form:
 ```
 
 Column attribute explanation:
-* "name": required - must correspond with name of column in CSV file
-* "column_type": required - must be one of "String", "Int", "Date", "Float", "Enum" or "Bool"
-* "nullable": optional - default value is `true`
-* "legal_vals": required for Enum type columns - list of accepted string values
-* "illegal_val_replacement": optional for Enum type columns, default replacement is empty sting
-* "format": required for Date type columns - 
+* "name": _required_ - must correspond with name of column in CSV file
+* "column_type": _required_ - must be one of "String", "Int", "Date", "Float", "Enum" or "Bool"
+* "nullable": _optional_ - default value is `true`
+* "legal_vals": _required for Enum type columns_ - list of accepted string values
+* "illegal_val_replacement": _optional for Enum type columns_ - default value is empty string
+* "format": _required for Date type columns_ - should match the syntax described [here](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
 
 ## Null handling
 

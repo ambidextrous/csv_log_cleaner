@@ -634,6 +634,7 @@ trait CastsToDate {
 }
 
 impl CastsToDate for String {
+    // `format` parameter should be a value of the form defined here: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
     fn casts_to_date(&self, format: &str) -> bool {
         NaiveDate::parse_from_str(self, format).is_ok()
     }
