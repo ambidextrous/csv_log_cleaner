@@ -312,7 +312,7 @@ fn process_row_buffer_errors<'a>(
         tx,
     );
     if let Err(err) = buffer_processing_result {
-        // Can't send Box<dyn Error>> between threads, so convert e 
+        // Can't send Box<dyn Error>> between threads, so convert e
         // to String before sending through channel
         error_tx.send(Err(err.to_string())).unwrap();
     }
