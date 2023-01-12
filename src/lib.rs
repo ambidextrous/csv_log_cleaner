@@ -94,6 +94,65 @@ impl std::fmt::Display for CSVCleaningError {
     }
 }
 
+/// Clean CSV files to conform to a type schema by streaming them from `stdin` to `stdout` through a small memory buffers using multiple threads and logging data loss.
+///
+/// ```
+/// use std::error::Error;
+/// use csv::Reader;
+/// use csv::Writer;
+/// use csv_cleaner::process_rows;
+/// use tempfile::tempdir;
+/// use std::fs;
+///
+/// // Arrange
+/// let dir = tempdir().expect("To create TempDir");
+/// let input_csv_data = r#"NAME,AGE,DATE_OF_BIRTH
+/// Raul,27,2004-01-31
+/// Duke,27.8,2004-31-01
+/// "#;
+/// let input_path = dir.path().join("input.csv");
+/// let output_path = dir.path().join("output.csv");
+/// fs::write(input_path.clone(), input_csv_data).expect("Unable to write file");
+/// let mut rdr = Reader::from_path(input_path).expect("To create reader");   
+/// let mut wtr = Writer::from_path(output_path.clone()).expect("To create writer");
+/// let log_path = dir.path().join("log.json");
+/// let log_path_str = log_path.to_str().unwrap();
+/// let log_path_string = String::from(log_path_str);
+/// let schema_path = dir.path().join("schema.json");
+/// let schema_path_str = schema_path.to_str().unwrap();
+/// let schema_path_string = String::from(schema_path_str);
+/// let schema_string = r#"{
+/// "columns": [
+///     {
+///         "name": "NAME",
+///         "column_type": "String"
+///     },
+///     {
+///         "name": "AGE",
+///         "column_type": "Int"
+///     },
+///     {
+///         "name": "DATE_OF_BIRTH",
+///         "column_type": "Date",
+///         "format": "%Y-%m-%d"
+///     }
+/// ]
+/// }"#;
+/// fs::write(schema_path, schema_string).expect("Unable to write file");
+/// let buffer_size = 1;
+///
+/// // Act
+/// let result = process_rows(&mut rdr, wtr, &log_path_string, &schema_path_string, buffer_size);
+/// println!("{:?}", result);
+/// let output_csv = fs::read_to_string(output_path).expect("To read from file");
+/// println!("{}", output_csv);
+///
+/// // Assert
+/// assert!(output_csv.contains("Duke,,\n"));
+/// assert!(output_csv.contains("Raul,27,2004-01-31\n"));
+/// assert!(output_csv.contains("NAME,AGE,DATE_OF_BIRTH\n"));
+/// assert_eq!(output_csv.len(), "NAME,AGE,DATE_OF_BIRTH\nRaul,27,2004-01-31\nDuke,,\n".len());
+/// ```
 pub fn process_rows(
     rdr: &mut Reader<impl io::Read>,
     mut wtr: Writer<impl io::Write + std::marker::Send + std::marker::Sync + 'static>,
@@ -101,8 +160,6 @@ pub fn process_rows(
     schema_path: &String,
     buffer_size: usize,
 ) -> Result<(), Box<dyn Error>> {
-    // Process CSV row by row in memory buffer, writing the output to disk
-    // as you go.
     let (tx, rx): (
         Sender<HashMap<String, ColumnLog>>,
         Receiver<HashMap<String, ColumnLog>>,

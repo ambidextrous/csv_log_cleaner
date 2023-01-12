@@ -20,10 +20,10 @@ Data is processed row-wise, in adjustably sized buffers using all of the availab
 
 ### Parameters
 
-`-j` - _required_ path to input JSON schema file
-`-l` - _required_ path to output JOSN log file
-`-s` - _optional_ (default `','`) separator character, e.g. `'\t'` for TSV files: will be used both in input and output
-`-b` - _optional_ buffer size integer (default  `1000`) indicating the size of each new buffer of rows allocated a new thread for processing: if set too low, the costs of thread switching are likely to outweight the benefits of parallel processing. 
+`-j --schema` - _required_ path to input JSON schema file
+`-l --log` - _required_ path to output JOSN log file
+`-s --sep` - _optional_ (default `','`) separator character, e.g. `'\t'` for TSV files: will be used both in input and output
+`-b --buffer_size` - _optional_ buffer size integer (default  `1000`) indicating the size of each new buffer of rows allocated a new thread for processing: if set too low, the costs of thread switching are likely to outweight the benefits of parallel processing. 
 
 ## Motivation
 
