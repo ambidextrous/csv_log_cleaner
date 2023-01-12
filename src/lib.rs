@@ -143,9 +143,7 @@ impl std::fmt::Display for CSVCleaningError {
 ///
 /// // Act
 /// let result = process_rows(&mut rdr, wtr, &log_path_string, &schema_path_string, buffer_size);
-/// println!("{:?}", result);
 /// let output_csv = fs::read_to_string(output_path).expect("To read from file");
-/// println!("{}", output_csv);
 ///
 /// // Assert
 /// assert!(output_csv.contains("Duke,,\n"));
