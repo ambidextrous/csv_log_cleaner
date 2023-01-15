@@ -1,10 +1,12 @@
+//! Clean CSV files to conform to a type schema by streaming them
+//! through small memory buffers using multiple threads and
+//! logging data loss.
+
 use chrono::NaiveDate;
-use csv::Reader;
-use csv::StringRecord;
-use csv::Writer;
-use rustc_hash::FxHashMap as HashMap;
-use serde::Deserialize;
-use serde::Serialize;
+use csv::{Reader, StringRecord, Writer};
+use rustc_hash::FxHashMap; // Lots of small HashMaps used, so prioritize fast writes and look ups over collision avoidance
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::io;
@@ -33,7 +35,7 @@ enum ColumnType {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Column {
+struct Column {
     column_type: ColumnType,
     illegal_val_replacement: String,
     legal_vals: Vec<String>,
@@ -55,19 +57,34 @@ struct JsonColumn {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct JsonSchema {
+struct JsonSchema {
     columns: Vec<JsonColumn>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ColumnLog {
-    name: String,
-    invalid_count: i32,
-    max_invalid: Option<String>,
-    min_invalid: Option<String>,
+/// Holds data on the invalid count and max and min invalid string values
+/// (calculated by String comparison) found in that column.
+///
+/// # Examples
+///
+/// ```
+/// use csv_cleaner::ColumnLog;
+///
+/// let date_of_birth_column_log = ColumnLog {
+///     name: "DATE_OF_BIRTH".to_string(),
+///     invalid_count: 2,
+///     max_invalid: Some("2444-89-01".to_string()),
+///     min_invalid: Some("2004-31-01".to_string()),
+/// };
+/// ```
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ColumnLog {
+    pub name: String,
+    pub invalid_count: i32,
+    pub max_invalid: Option<String>,
+    pub min_invalid: Option<String>,
 }
 
-type Record = HashMap<String, String>;
+type Record = FxHashMap<String, String>;
 
 #[derive(Debug)]
 struct CSVCleaningError {
@@ -94,27 +111,28 @@ impl std::fmt::Display for CSVCleaningError {
     }
 }
 
-/// Clean CSV files to conform to a type schema by streaming them from `stdin` to `stdout` through a small memory buffers using multiple threads and logging data loss.
+/// Clean CSV files to conform to a type schema by streaming them through small memory buffers using multiple threads and logging data loss.
+///
+/// # Examples
 ///
 /// ```
 /// use std::error::Error;
-/// use csv::Reader;
-/// use csv::Writer;
-/// use csv_cleaner::process_rows;
+/// use csv::{Reader,Writer};
+/// use csv_cleaner::{process_rows,ColumnLog};
 /// use tempfile::tempdir;
 /// use std::fs;
 ///
 /// // Arrange
-/// let dir = tempdir().expect("To create TempDir");
+/// let dir = tempdir().expect("To be able to create temporary directory");
 /// let input_csv_data = r#"NAME,AGE,DATE_OF_BIRTH
 /// Raul,27,2004-01-31
 /// Duke,27.8,2004-31-01
 /// "#;
 /// let input_path = dir.path().join("input.csv");
 /// let output_path = dir.path().join("output.csv");
-/// fs::write(input_path.clone(), input_csv_data).expect("Unable to write file");
-/// let mut rdr = Reader::from_path(input_path).expect("To create reader");   
-/// let mut wtr = Writer::from_path(output_path.clone()).expect("To create writer");
+/// fs::write(input_path.clone(), input_csv_data).expect("To be able to write file");
+/// let mut rdr = Reader::from_path(input_path).expect("To be able to create reader");   
+/// let mut wtr = Writer::from_path(output_path.clone()).expect("To be able to create writer");
 /// let log_path = dir.path().join("log.json");
 /// let log_path_str = log_path.to_str().unwrap();
 /// let log_path_string = String::from(log_path_str);
@@ -138,18 +156,27 @@ impl std::fmt::Display for CSVCleaningError {
 ///     }
 /// ]
 /// }"#;
-/// fs::write(schema_path, schema_string).expect("Unable to write file");
+/// fs::write(schema_path, schema_string).expect("To be able to write file");
 /// let buffer_size = 1;
+/// let expected_date_of_birth_column_log = ColumnLog {
+///     name: "DATE_OF_BIRTH".to_string(),
+///     invalid_count: 1,
+///     max_invalid: Some("2004-31-01".to_string()),
+///     min_invalid: Some("2004-31-01".to_string()),
+/// };
+///
 ///
 /// // Act
 /// let result = process_rows(&mut rdr, wtr, &log_path_string, &schema_path_string, buffer_size);
-/// let output_csv = fs::read_to_string(output_path).expect("To read from file");
+/// let output_csv = fs::read_to_string(output_path).expect("To be able to read from file");
+///
 ///
 /// // Assert
 /// assert!(output_csv.contains("Duke,,\n"));
 /// assert!(output_csv.contains("Raul,27,2004-01-31\n"));
 /// assert!(output_csv.contains("NAME,AGE,DATE_OF_BIRTH\n"));
 /// assert_eq!(output_csv.len(), "NAME,AGE,DATE_OF_BIRTH\nRaul,27,2004-01-31\nDuke,,\n".len());
+/// assert_eq!(result.expect("Key to be in map").get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
 /// ```
 pub fn process_rows(
     rdr: &mut Reader<impl io::Read>,
@@ -157,10 +184,10 @@ pub fn process_rows(
     log_path: &String,
     schema_path: &String,
     buffer_size: usize,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<HashMap<String, ColumnLog>, Box<dyn Error>> {
     let (tx, rx): (
-        Sender<HashMap<String, ColumnLog>>,
-        Receiver<HashMap<String, ColumnLog>>,
+        Sender<FxHashMap<String, ColumnLog>>,
+        Receiver<FxHashMap<String, ColumnLog>>,
     ) = mpsc::channel();
     let (error_tx, error_rx): (Sender<Result<(), String>>, Receiver<Result<(), String>>) =
         mpsc::channel();
@@ -254,17 +281,17 @@ pub fn process_rows(
     let log_map_errors = jsonify_log_map_errors(combined_log_map.clone(), &row_count);
     eprintln!("Finished processing CSV file. Error report:\n{log_map_errors}");
 
-    Ok(())
+    Ok(copy_to_std_hashmap(combined_log_map))
 }
 
 fn process_row_buffer<'a>(
     column_names: &'a StringRecord,
-    schema_dict: &'a HashMap<String, Column>,
-    row_buffer: &[HashMap<String, String>],
+    schema_dict: &'a FxHashMap<String, Column>,
+    row_buffer: &[FxHashMap<String, String>],
     constants: &Constants,
     locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
     column_string_names: &[String],
-    tx: Sender<HashMap<String, ColumnLog>>,
+    tx: Sender<FxHashMap<String, ColumnLog>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut buffer_log_map = generate_column_log_map(column_names, column_string_names);
     let mut cleaned_rows = Vec::new();
@@ -289,9 +316,9 @@ fn process_row_buffer<'a>(
 
 fn process_row<'a>(
     ordered_column_names: &'a StringRecord,
-    schema_dict: &'a HashMap<String, Column>,
-    row_map: HashMap<String, String>,
-    log_map: &'a mut HashMap<String, ColumnLog>,
+    schema_dict: &'a FxHashMap<String, Column>,
+    row_map: FxHashMap<String, String>,
+    log_map: &'a mut FxHashMap<String, ColumnLog>,
     constants: &Constants,
 ) -> Result<StringRecord, Box<dyn Error>> {
     let mut processed_row = Vec::new();
@@ -349,12 +376,12 @@ fn process_row<'a>(
 
 fn process_row_buffer_errors<'a>(
     column_names: &'a StringRecord,
-    schema_dict: &'a HashMap<String, Column>,
-    row_buffer: &[HashMap<String, String>],
+    schema_dict: &'a FxHashMap<String, Column>,
+    row_buffer: &[FxHashMap<String, String>],
     constants: &Constants,
     locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
     column_string_names: &[String],
-    tx: Sender<HashMap<String, ColumnLog>>,
+    tx: Sender<FxHashMap<String, ColumnLog>>,
     error_tx: Sender<Result<(), String>>,
 ) -> Result<(), Box<dyn Error>> {
     let buffer_processing_result = process_row_buffer(
@@ -375,9 +402,17 @@ fn process_row_buffer_errors<'a>(
     Ok(())
 }
 
+fn copy_to_std_hashmap(fast_map: FxHashMap<String, ColumnLog>) -> HashMap<String, ColumnLog> {
+    let mut regular_map = HashMap::new();
+    for (key, value) in fast_map {
+        regular_map.insert(key, value);
+    }
+    regular_map
+}
+
 fn are_equal_spec_and_csv_columns(
     csv_columns_record: &StringRecord,
-    spec: &HashMap<String, Column>,
+    spec: &FxHashMap<String, Column>,
 ) -> bool {
     let mut csv_columns: Vec<String> = csv_columns_record
         .iter()
@@ -392,7 +427,7 @@ fn are_equal_spec_and_csv_columns(
 fn generate_column_log_map(
     column_names: &StringRecord,
     column_string_names: &[String],
-) -> HashMap<String, ColumnLog> {
+) -> FxHashMap<String, ColumnLog> {
     let column_logs: Vec<ColumnLog> = column_names
         .clone()
         .into_iter()
@@ -403,7 +438,7 @@ fn generate_column_log_map(
             min_invalid: None,
         })
         .collect();
-    let mut_log_map: HashMap<String, ColumnLog> = column_string_names
+    let mut_log_map: FxHashMap<String, ColumnLog> = column_string_names
         .to_owned()
         .into_iter()
         .zip(column_logs.iter().cloned())
@@ -486,16 +521,16 @@ fn generate_constants() -> Constants {
     }
 }
 
-fn jsonify_log_map_errors(log_map: HashMap<String, ColumnLog>, total_rows: &i32) -> String {
+fn jsonify_log_map_errors(log_map: FxHashMap<String, ColumnLog>, total_rows: &i32) -> String {
     jsonify_log_map_all_or_errors(log_map, total_rows, &true)
 }
 
-fn jsonify_log_map(log_map: HashMap<String, ColumnLog>, total_rows: &i32) -> String {
+fn jsonify_log_map(log_map: FxHashMap<String, ColumnLog>, total_rows: &i32) -> String {
     jsonify_log_map_all_or_errors(log_map, total_rows, &false)
 }
 
 fn jsonify_log_map_all_or_errors(
-    log_map: HashMap<String, ColumnLog>,
+    log_map: FxHashMap<String, ColumnLog>,
     total_rows: &i32,
     errors_only: &bool,
 ) -> String {
@@ -530,12 +565,12 @@ fn jsonify_log_map_all_or_errors(
     combined_string
 }
 
-pub fn generate_validated_schema(
+fn generate_validated_schema(
     json_schema: JsonSchema,
-) -> Result<HashMap<String, Column>, io::Error> {
+) -> Result<FxHashMap<String, Column>, io::Error> {
     let empty_vec: Vec<String> = Vec::new();
     let empty_string = String::new();
-    let mut column_map: HashMap<String, Column> = HashMap::default();
+    let mut column_map: FxHashMap<String, Column> = FxHashMap::default();
     for column in json_schema.columns {
         let new_col = Column {
             column_type: column.column_type.clone(),

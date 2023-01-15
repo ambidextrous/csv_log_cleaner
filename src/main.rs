@@ -23,7 +23,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     let log_path = args.log;
     let schema_path = args.schema;
     let byte_sep = args.sep as u8;
-    let mut rdr = csv::Reader::from_reader(io::stdin());
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(byte_sep)
         .from_reader(io::stdin());
