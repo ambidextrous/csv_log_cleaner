@@ -1,14 +1,31 @@
+//! Clean CSV files to conform to a type schema by streaming them
+//! through small memory buffers using multiple threads and
+//! logging data loss.
+//!
+//! # Documentation
+//! [Github](https://github.com/ambidextrous/csv_cleaner)
+
 use chrono::NaiveDate;
-use csv::StringRecord;
-use rustc_hash::FxHashMap as HashMap;
-use serde::Deserialize;
-use serde::Serialize;
+use csv::{Reader, StringRecord, Writer};
+use rustc_hash::FxHashMap; // Lots of small HashMaps used, so prioritize fast writes and look ups over collision avoidance
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::fs::File;
 use std::io;
 use std::io::ErrorKind;
 use std::iter::Iterator;
+use std::marker::Send;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::vec::Vec;
+
+#[derive(Debug, Clone)]
+struct Constants {
+    null_vals: Vec<String>,
+    bool_vals: Vec<String>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 enum ColumnType {
@@ -21,7 +38,7 @@ enum ColumnType {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Column {
+struct Column {
     column_type: ColumnType,
     illegal_val_replacement: String,
     legal_vals: Vec<String>,
@@ -43,100 +60,280 @@ struct JsonColumn {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct JsonSchema {
+struct JsonSchema {
     columns: Vec<JsonColumn>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ColumnLog {
-    name: String,
-    invalid_count: i32,
-    max_invalid: Option<String>,
-    min_invalid: Option<String>,
+/// Holds data on the invalid count and max and min invalid string values
+/// (calculated by String comparison) found in that column.
+///
+/// # Examples
+///
+/// ```
+/// use csv_cleaner::ColumnLog;
+///
+/// let date_of_birth_column_log = ColumnLog {
+///     name: "DATE_OF_BIRTH".to_string(),
+///     invalid_count: 2,
+///     max_invalid: Some("2444-89-01".to_string()),
+///     min_invalid: Some("2004-31-01".to_string()),
+/// };
+/// ```
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ColumnLog {
+    pub name: String,
+    pub invalid_count: i32,
+    pub max_invalid: Option<String>,
+    pub min_invalid: Option<String>,
 }
 
-type Record = HashMap<String, String>;
+type Record = FxHashMap<String, String>;
 
+#[derive(Debug)]
+struct CSVCleaningError {
+    message: String,
+}
+
+impl CSVCleaningError {
+    fn new(message: &str) -> CSVCleaningError {
+        CSVCleaningError {
+            message: message.to_string(),
+        }
+    }
+}
+
+impl Error for CSVCleaningError {
+    fn description(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for CSVCleaningError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+/// Clean CSV files to conform to a type schema by streaming them through small memory buffers using multiple threads and logging data loss.
+///
+/// # Examples
+///
+/// ```
+/// use std::error::Error;
+/// use csv::{Reader,Writer};
+/// use csv_cleaner::{process_rows,ColumnLog};
+/// use tempfile::tempdir;
+/// use std::fs;
+///
+/// // Arrange
+/// let dir = tempdir().expect("To be able to create temporary directory");
+/// let input_csv_data = r#"NAME,AGE,DATE_OF_BIRTH
+/// Raul,27,2004-01-31
+/// Duke,27.8,2004-31-01
+/// "#;
+/// let input_path = dir.path().join("input.csv");
+/// let output_path = dir.path().join("output.csv");
+/// fs::write(input_path.clone(), input_csv_data).expect("To be able to write file");
+/// let mut rdr = Reader::from_path(input_path).expect("To be able to create reader");   
+/// let mut wtr = Writer::from_path(output_path.clone()).expect("To be able to create writer");
+/// let log_path = dir.path().join("log.json");
+/// let log_path_str = log_path.to_str().unwrap();
+/// let log_path_string = String::from(log_path_str);
+/// let schema_path = dir.path().join("schema.json");
+/// let schema_path_str = schema_path.to_str().unwrap();
+/// let schema_path_string = String::from(schema_path_str);
+/// let schema_string = r#"{
+/// "columns": [
+///     {
+///         "name": "NAME",
+///         "column_type": "String"
+///     },
+///     {
+///         "name": "AGE",
+///         "column_type": "Int"
+///     },
+///     {
+///         "name": "DATE_OF_BIRTH",
+///         "column_type": "Date",
+///         "format": "%Y-%m-%d"
+///     }
+/// ]
+/// }"#;
+/// fs::write(schema_path, schema_string).expect("To be able to write file");
+/// let buffer_size = 1;
+/// let expected_date_of_birth_column_log = ColumnLog {
+///     name: "DATE_OF_BIRTH".to_string(),
+///     invalid_count: 1,
+///     max_invalid: Some("2004-31-01".to_string()),
+///     min_invalid: Some("2004-31-01".to_string()),
+/// };
+///
+///
+/// // Act
+/// let result = process_rows(&mut rdr, wtr, &log_path_string, &schema_path_string, buffer_size);
+/// let output_csv = fs::read_to_string(output_path).expect("To be able to read from file");
+///
+///
+/// // Assert
+/// assert!(output_csv.contains("Duke,,\n"));
+/// assert!(output_csv.contains("Raul,27,2004-01-31\n"));
+/// assert!(output_csv.contains("NAME,AGE,DATE_OF_BIRTH\n"));
+/// assert_eq!(output_csv.len(), "NAME,AGE,DATE_OF_BIRTH\nRaul,27,2004-01-31\nDuke,,\n".len());
+/// assert_eq!(result.expect("Key to be in map").get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
+/// ```
 pub fn process_rows(
-    input_path: &String,
-    output_path: &String,
+    rdr: &mut Reader<impl io::Read>,
+    mut wtr: Writer<impl io::Write + std::marker::Send + std::marker::Sync + 'static>,
     log_path: &String,
     schema_path: &String,
-    sep: u8,
-) -> Result<(), Box<dyn Error>> {
-    // Process CSV row by row in memory buffer, writing the output to disk
-    // as you go.
+    buffer_size: usize,
+) -> Result<HashMap<String, ColumnLog>, Box<dyn Error>> {
+    let (tx, rx): (
+        Sender<FxHashMap<String, ColumnLog>>,
+        Receiver<FxHashMap<String, ColumnLog>>,
+    ) = mpsc::channel();
+    let (error_tx, error_rx): (Sender<Result<(), String>>, Receiver<Result<(), String>>) =
+        mpsc::channel();
     let mut row_count = 0;
+    let constants = generate_constants();
     let schema_string = fs::read_to_string(schema_path)?;
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
-    let null_vals = get_null_vals();
-    let header_input_file = File::open(input_path)?;
-    let mut header_rdr = csv::Reader::from_reader(header_input_file);
-    let mut wtr = csv::WriterBuilder::new()
-        .delimiter(sep)
-        .from_path(output_path)?;
-    let column_names = header_rdr.headers()?;
-    wtr.write_record(&column_names.clone())?;
+    let column_names = rdr.headers()?.clone();
+    let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
+    if !spec_and_csv_columns_match {
+        return Err(Box::new(CSVCleaningError::new(
+            "Error: CSV columns and JSON spec columns do not match",
+        )));
+    }
+    wtr.write_record(&column_names)?;
+    let locked_wtr = Arc::new(Mutex::new(wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
-    let column_logs: Vec<ColumnLog> = column_names
-        .clone()
-        .into_iter()
-        .map(|x| ColumnLog {
-            name: x.to_string(),
-            invalid_count: 0,
-            max_invalid: None,
-            min_invalid: None,
-        })
-        .collect();
-    let column_log_tuples: Vec<(String, ColumnLog)> = column_string_names
-        .clone()
-        .into_iter()
-        .zip(column_logs.iter().cloned())
-        .collect();
-    let mut mut_log_map: HashMap<String, ColumnLog> = column_log_tuples.into_iter().collect();
-    let mut rdr = csv::ReaderBuilder::new()
-        .delimiter(sep)
-        .from_path(input_path)?;
+    let mut row_buffer = Vec::new();
+    let core_count = num_cpus::get();
+    let num_threads = if core_count == 1 { 1 } else { core_count - 1 };
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        .unwrap();
+    let mut job_counter = 0;
     for row in rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
-        let cleaned_row = process_row(
-            column_names,
-            &schema_map,
-            row_map,
-            &mut mut_log_map,
-            &null_vals,
-        )?;
-        wtr.write_record(&cleaned_row)?;
+        row_buffer.push(row_map);
+        if row_buffer.len() == buffer_size {
+            job_counter += 1;
+            let cloned_row_buffer = row_buffer.clone();
+            let cloned_schema_map = schema_map.clone();
+            let cloned_column_names = column_names.clone();
+            let cloned_constants = constants.clone();
+            let cloned_locked_wtr = Arc::clone(&locked_wtr);
+            let cloned_column_string_names = column_string_names.clone();
+            let thread_tx = tx.clone();
+            let thread_error_tx = error_tx.clone();
+            pool.spawn(move || {
+                process_row_buffer_errors(
+                    &cloned_column_names,
+                    &cloned_schema_map,
+                    &cloned_row_buffer,
+                    &cloned_constants,
+                    cloned_locked_wtr,
+                    &cloned_column_string_names,
+                    thread_tx,
+                    thread_error_tx,
+                )
+                .expect("Called function to deal with error before can bubble up this far");
+            });
+            row_buffer.clear();
+        }
+        for potential_error in error_rx.try_iter() {
+            potential_error?;
+        }
     }
-    let log_map_all = jsonify_log_map(mut_log_map.clone(), &row_count);
+    let thread_tx = tx;
+    if !row_buffer.is_empty() {
+        job_counter += 1;
+        process_row_buffer(
+            &column_names,
+            &schema_map,
+            &row_buffer,
+            &constants,
+            locked_wtr,
+            &column_string_names,
+            thread_tx,
+        )?;
+    }
+    let mut combined_log_map = generate_column_log_map(&column_names, &column_string_names);
+    for log_map in rx.iter() {
+        job_counter -= 1;
+        for (column_name, column_log) in log_map {
+            let unwrapped_log = combined_log_map.get(&column_name.clone()).unwrap();
+            let updated_log = unwrapped_log.update(&column_log);
+            combined_log_map.insert(column_name.clone(), updated_log);
+        }
+        if job_counter < 1 {
+            break;
+        }
+    }
+    for potential_error in error_rx.try_iter() {
+        potential_error?;
+    }
+    let log_map_all = jsonify_log_map(combined_log_map.clone(), &row_count);
     let log_error_message = format!("Unable to write JSON log file to `{log_path}`");
     fs::write(log_path, log_map_all).expect(&log_error_message);
-    let log_map_errors = jsonify_log_map_errors(mut_log_map, &row_count);
-    println!("Finished processing CSV file. Error report:\n{log_map_errors}");
+    let log_map_errors = jsonify_log_map_errors(combined_log_map.clone(), &row_count);
+    eprintln!("Finished processing CSV file. Error report:\n{log_map_errors}");
+
+    Ok(copy_to_std_hashmap(combined_log_map))
+}
+
+fn process_row_buffer<'a>(
+    column_names: &'a StringRecord,
+    schema_dict: &'a FxHashMap<String, Column>,
+    row_buffer: &[FxHashMap<String, String>],
+    constants: &Constants,
+    locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
+    column_string_names: &[String],
+    tx: Sender<FxHashMap<String, ColumnLog>>,
+) -> Result<(), Box<dyn Error>> {
+    let mut buffer_log_map = generate_column_log_map(column_names, column_string_names);
+    let mut cleaned_rows = Vec::new();
+    for row_map in row_buffer.iter() {
+        let cleaned_row = process_row(
+            column_names,
+            schema_dict,
+            row_map.clone(),
+            &mut buffer_log_map,
+            constants,
+        )?;
+        cleaned_rows.push(cleaned_row);
+    }
+    let mut wtr = locked_wtr.lock().unwrap();
+    for cleaned_row in cleaned_rows.iter() {
+        wtr.write_record(cleaned_row)?;
+    }
+    tx.send(buffer_log_map).unwrap();
 
     Ok(())
 }
 
 fn process_row<'a>(
     ordered_column_names: &'a StringRecord,
-    schema_dict: &'a HashMap<String, Column>,
-    row_map: HashMap<String, String>,
-    log_map: &'a mut HashMap<String, ColumnLog>,
-    null_vals: &Vec<String>,
+    schema_dict: &'a FxHashMap<String, Column>,
+    row_map: FxHashMap<String, String>,
+    log_map: &'a mut FxHashMap<String, ColumnLog>,
+    constants: &Constants,
 ) -> Result<StringRecord, Box<dyn Error>> {
-    // Process a single CSV row
     let mut processed_row = Vec::new();
     for column_name in ordered_column_names {
         let column_value = row_map.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in row map")
         })?;
-        let cleaned_value = column_value.clean(&null_vals);
+        let cleaned_value = column_value.clean(constants);
         let column = schema_dict.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in schema`")
         })?;
-        let processed_value = cleaned_value.process(&column);
+        let processed_value = cleaned_value.process(column, constants);
         if processed_value != cleaned_value {
             let column_log = log_map.get(column_name).ok_or_else(|| {
                 format!("Key error, could not find column_name `{column_name}` in log_map`")
@@ -180,16 +377,163 @@ fn process_row<'a>(
     Ok(processed_record)
 }
 
-fn jsonify_log_map_errors(log_map: HashMap<String, ColumnLog>, total_rows: &i32) -> String {
+fn process_row_buffer_errors<'a>(
+    column_names: &'a StringRecord,
+    schema_dict: &'a FxHashMap<String, Column>,
+    row_buffer: &[FxHashMap<String, String>],
+    constants: &Constants,
+    locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
+    column_string_names: &[String],
+    tx: Sender<FxHashMap<String, ColumnLog>>,
+    error_tx: Sender<Result<(), String>>,
+) -> Result<(), Box<dyn Error>> {
+    let buffer_processing_result = process_row_buffer(
+        &column_names,
+        &schema_dict,
+        &row_buffer,
+        &constants,
+        locked_wtr,
+        &column_string_names,
+        tx,
+    );
+    if let Err(err) = buffer_processing_result {
+        // Can't send Box<dyn Error>> between threads, so convert e
+        // to String before sending through channel
+        error_tx.send(Err(err.to_string())).unwrap();
+    }
+
+    Ok(())
+}
+
+fn copy_to_std_hashmap(fast_map: FxHashMap<String, ColumnLog>) -> HashMap<String, ColumnLog> {
+    let mut regular_map = HashMap::new();
+    for (key, value) in fast_map {
+        regular_map.insert(key, value);
+    }
+    regular_map
+}
+
+fn are_equal_spec_and_csv_columns(
+    csv_columns_record: &StringRecord,
+    spec: &FxHashMap<String, Column>,
+) -> bool {
+    let mut csv_columns: Vec<String> = csv_columns_record
+        .iter()
+        .map(|field| field.to_string())
+        .collect();
+    let mut spec_columns: Vec<String> = spec.keys().cloned().collect();
+    csv_columns.sort();
+    spec_columns.sort();
+    csv_columns == spec_columns
+}
+
+fn generate_column_log_map(
+    column_names: &StringRecord,
+    column_string_names: &[String],
+) -> FxHashMap<String, ColumnLog> {
+    let column_logs: Vec<ColumnLog> = column_names
+        .clone()
+        .into_iter()
+        .map(|x| ColumnLog {
+            name: x.to_string(),
+            invalid_count: 0,
+            max_invalid: None,
+            min_invalid: None,
+        })
+        .collect();
+    let mut_log_map: FxHashMap<String, ColumnLog> = column_string_names
+        .to_owned()
+        .into_iter()
+        .zip(column_logs.iter().cloned())
+        .collect();
+    mut_log_map
+}
+
+impl ColumnLog {
+    fn update(&self, other: &ColumnLog) -> ColumnLog {
+        assert!(self.name == other.name);
+        let new_invalid_count = self.invalid_count + other.invalid_count;
+        let new_max = match (self.max_invalid.clone(), other.max_invalid.clone()) {
+            (Some(x), Some(y)) => {
+                if x > y {
+                    Some(x)
+                } else {
+                    Some(y)
+                }
+            }
+            (Some(x), None) => Some(x),
+            (None, Some(y)) => Some(y),
+            _ => None,
+        };
+        let new_min = match (self.min_invalid.clone(), other.min_invalid.clone()) {
+            (Some(x), Some(y)) => {
+                if x < y {
+                    Some(x)
+                } else {
+                    Some(y)
+                }
+            }
+            (Some(x), None) => Some(x),
+            (None, Some(y)) => Some(y),
+            _ => None,
+        };
+
+        ColumnLog {
+            name: self.name.clone(),
+            invalid_count: new_invalid_count,
+            max_invalid: new_max,
+            min_invalid: new_min,
+        }
+    }
+}
+
+fn generate_constants() -> Constants {
+    let null_vals = vec![
+        "#N/A".to_string(),
+        "#N/A".to_string(),
+        "N/A".to_string(),
+        "#NA".to_string(),
+        "-1.#IND".to_string(),
+        "-1.#QNAN".to_string(),
+        "-NaN".to_string(),
+        "-nan".to_string(),
+        "1.#IND".to_string(),
+        "1.#QNAN".to_string(),
+        "<NA>".to_string(),
+        "N/A".to_string(),
+        "NA".to_string(),
+        "NULL".to_string(),
+        "NaN".to_string(),
+        "n/a".to_string(),
+        "nan".to_string(),
+        "null".to_string(),
+    ];
+    let bool_vals = vec![
+        "true".to_string(),
+        "1".to_string(),
+        "1.0".to_string(),
+        "yes".to_string(),
+        "false".to_string(),
+        "0.0".to_string(),
+        "0".to_string(),
+        "no".to_string(),
+    ];
+    Constants {
+        null_vals,
+        bool_vals,
+    }
+}
+
+fn jsonify_log_map_errors(log_map: FxHashMap<String, ColumnLog>, total_rows: &i32) -> String {
     jsonify_log_map_all_or_errors(log_map, total_rows, &true)
 }
 
-fn jsonify_log_map(log_map: HashMap<String, ColumnLog>, total_rows: &i32) -> String {
+fn jsonify_log_map(log_map: FxHashMap<String, ColumnLog>, total_rows: &i32) -> String {
     jsonify_log_map_all_or_errors(log_map, total_rows, &false)
 }
 
 fn jsonify_log_map_all_or_errors(
-    log_map: HashMap<String, ColumnLog>,
+    log_map: FxHashMap<String, ColumnLog>,
     total_rows: &i32,
     errors_only: &bool,
 ) -> String {
@@ -210,7 +554,7 @@ fn jsonify_log_map_all_or_errors(
                     min_val = x.clone();
                 }
             }
-            let invalid_row_count = column_log.invalid_count.clone();
+            let invalid_row_count = column_log.invalid_count;
             let col_string = format!("{{\n\t\t\t\"column_name\": \"{column_name}\",\n\t\t\t\"invalid_row_count\": {invalid_row_count},\n\t\t\t\"max_illegal_val\": \"{max_val}\",\n\t\t\t\"min_illegal_val\": \"{min_val}\"\n\t\t}}");
             if is_first_row {
                 combined_string = format!("{combined_string}{col_string}");
@@ -224,25 +568,25 @@ fn jsonify_log_map_all_or_errors(
     combined_string
 }
 
-pub fn generate_validated_schema(
+fn generate_validated_schema(
     json_schema: JsonSchema,
-) -> Result<HashMap<String, Column>, io::Error> {
+) -> Result<FxHashMap<String, Column>, io::Error> {
     let empty_vec: Vec<String> = Vec::new();
     let empty_string = String::new();
-    let mut column_map: HashMap<String, Column> = HashMap::default();
+    let mut column_map: FxHashMap<String, Column> = FxHashMap::default();
     for column in json_schema.columns {
         let new_col = Column {
             column_type: column.column_type.clone(),
             illegal_val_replacement: column
                 .illegal_val_replacement
-                .unwrap_or(empty_string.clone()),
-            legal_vals: column.legal_vals.unwrap_or(empty_vec.clone()),
-            format: column.format.unwrap_or(empty_string.clone()),
+                .unwrap_or_else(|| empty_string.clone()),
+            legal_vals: column.legal_vals.unwrap_or_else(|| empty_vec.clone()),
+            format: column.format.unwrap_or_else(|| empty_string.clone()),
         };
 
         match column.column_type {
             ColumnType::Date => {
-                if new_col.format.len() == 0 {
+                if new_col.format.is_empty() {
                     let custom_error = io::Error::new(
                         ErrorKind::Other,
                         "Missing required `format` string value for Date column",
@@ -251,7 +595,7 @@ pub fn generate_validated_schema(
                 }
             }
             ColumnType::Enum => {
-                if new_col.legal_vals.len() == 0 {
+                if new_col.legal_vals.is_empty() {
                     let custom_error = io::Error::new(
                         ErrorKind::Other,
                         "Missing required `legal_vals` string list value for Enum column",
@@ -267,17 +611,17 @@ pub fn generate_validated_schema(
 }
 
 trait Process {
-    fn process(&self, column: &Column) -> Self;
+    fn process(&self, column: &Column, constants: &Constants) -> Self;
 }
 
 impl Process for String {
-    fn process(&self, column: &Column) -> Self {
+    fn process(&self, column: &Column, constants: &Constants) -> Self {
         match column.column_type {
             ColumnType::String => self.to_string(),
             ColumnType::Int => {
                 let cleaned = self.de_pseudofloat();
                 if cleaned.casts_to_int() {
-                    cleaned.to_string()
+                    cleaned
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
@@ -308,7 +652,7 @@ impl Process for String {
             }
             ColumnType::Bool => {
                 let cleaned = self;
-                if cleaned.casts_to_bool() {
+                if cleaned.casts_to_bool(constants) {
                     cleaned.to_string()
                 } else {
                     column.illegal_val_replacement.to_owned()
@@ -345,12 +689,12 @@ fn get_null_vals() -> Vec<String> {
 }
 
 trait Clean {
-    fn clean(&self, null_vals: &[String]) -> Self;
+    fn clean(&self, constants: &Constants) -> Self;
 }
 
 impl Clean for String {
-    fn clean(&self, null_vals: &[String]) -> Self {
-        if null_vals.contains(self) {
+    fn clean(&self, constants: &Constants) -> Self {
+        if constants.null_vals.contains(self) {
             String::new()
         } else {
             self.to_string()
@@ -359,22 +703,12 @@ impl Clean for String {
 }
 
 trait CastsToBool {
-    fn casts_to_bool(&self) -> bool;
+    fn casts_to_bool(&self, constants: &Constants) -> bool;
 }
 
 impl CastsToBool for String {
-    fn casts_to_bool(&self) -> bool {
-        let bool_strings = vec![
-            "true".to_string(),
-            "1".to_string(),
-            "1.0".to_string(),
-            "yes".to_string(),
-            "false".to_string(),
-            "0.0".to_string(),
-            "0".to_string(),
-            "no".to_string(),
-        ];
-        bool_strings.contains(&self.to_lowercase())
+    fn casts_to_bool(&self, constants: &Constants) -> bool {
+        constants.bool_vals.contains(&self.to_lowercase())
     }
 }
 
@@ -389,11 +723,12 @@ impl CastsToEnum for String {
 }
 
 trait CastsToDate {
-    fn casts_to_date(&self, format: &String) -> bool;
+    fn casts_to_date(&self, format: &str) -> bool;
 }
 
 impl CastsToDate for String {
-    fn casts_to_date(&self, format: &String) -> bool {
+    // `format` parameter should be a value of the form defined here: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+    fn casts_to_date(&self, format: &str) -> bool {
         NaiveDate::parse_from_str(self, format).is_ok()
     }
 }
@@ -467,10 +802,11 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
         let input = vec!["NULL".to_string(), String::new(), " dog\t".to_string()];
         let expected = vec![String::new(), String::new(), " dog\t".to_string()];
         let null_vals = get_null_vals();
+        let constants = generate_constants();
         // Act
         let result = input
             .iter()
-            .map(|x| x.clean(&null_vals))
+            .map(|x| x.clean(&constants))
             .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
@@ -531,8 +867,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -549,8 +889,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -591,8 +935,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: "%Y-%m-%d".to_string(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -627,8 +975,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -669,8 +1021,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
         ];
         let legal = vec!["A".to_string(), "B".to_string()];
         let expected = vec![true, true, true, true, true, true, false];
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.casts_to_bool()).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.casts_to_bool(&constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
@@ -687,8 +1043,12 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             legal_vals: legal_vals,
             format: String::new(),
         };
+        let constants = generate_constants();
         // Act
-        let result = input.iter().map(|x| x.process(&column)).collect::<Vec<_>>();
+        let result = input
+            .iter()
+            .map(|x| x.process(&column, &constants))
+            .collect::<Vec<_>>();
         // Assert
         assert_eq!(result, expected);
     }
