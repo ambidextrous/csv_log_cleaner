@@ -1,6 +1,9 @@
 //! Clean CSV files to conform to a type schema by streaming them
 //! through small memory buffers using multiple threads and
 //! logging data loss.
+//!
+//! # Documentation
+//! [Github](https://github.com/ambidextrous/csv_cleaner)
 
 use chrono::NaiveDate;
 use csv::{Reader, StringRecord, Writer};
