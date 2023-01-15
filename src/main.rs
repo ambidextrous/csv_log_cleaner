@@ -1,5 +1,5 @@
 use clap::Parser;
-use csv_cleaner::process_rows;
+use csv_log_cleaner::process_rows;
 use std::error::Error;
 use std::io;
 use std::process;

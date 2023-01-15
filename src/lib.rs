@@ -3,7 +3,7 @@
 //! logging data loss.
 //!
 //! # Documentation
-//! [Github](https://github.com/ambidextrous/csv_cleaner)
+//! [Github](https://github.com/ambidextrous/csv_log_cleaner)
 
 use chrono::NaiveDate;
 use csv::{Reader, StringRecord, Writer};
@@ -70,7 +70,7 @@ struct JsonSchema {
 /// # Examples
 ///
 /// ```
-/// use csv_cleaner::ColumnLog;
+/// use csv_log_cleaner::ColumnLog;
 ///
 /// let date_of_birth_column_log = ColumnLog {
 ///     name: "DATE_OF_BIRTH".to_string(),
@@ -121,7 +121,7 @@ impl std::fmt::Display for CSVCleaningError {
 /// ```
 /// use std::error::Error;
 /// use csv::{Reader,Writer};
-/// use csv_cleaner::{process_rows,ColumnLog};
+/// use csv_log_cleaner::{process_rows,ColumnLog};
 /// use tempfile::tempdir;
 /// use std::fs;
 ///

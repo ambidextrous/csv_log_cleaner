@@ -200,7 +200,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "csv_cleaner"
+name = "csv_log_cleaner"
 version = "0.1.0"
 dependencies = [
  "chrono",

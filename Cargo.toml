@@ -1,5 +1,6 @@
 [package]
-name = "csv_cleaner"
+license = "MIT"
+name = "csv_log_cleaner"
 version = "0.1.0"
 edition = "2021"
 

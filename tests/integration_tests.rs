@@ -1,5 +1,5 @@
 use csv::Reader;
-use csv_cleaner::process_rows;
+use csv_log_cleaner::process_rows;
 use std::env::temp_dir;
 use std::fs;
 
