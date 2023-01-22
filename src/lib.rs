@@ -134,8 +134,8 @@ impl std::fmt::Display for CSVCleaningError {
 /// let input_path = dir.path().join("input.csv");
 /// let output_path = dir.path().join("output.csv");
 /// fs::write(input_path.clone(), input_csv_data).expect("To be able to write file");
-/// let mut rdr = Reader::from_path(input_path).expect("To be able to create reader");   
-/// let mut wtr = Writer::from_path(output_path.clone()).expect("To be able to create writer");
+/// let mut csv_rdr = Reader::from_path(input_path).expect("To be able to create reader");   
+/// let mut csv_wtr = Writer::from_path(output_path.clone()).expect("To be able to create writer");
 /// let log_path = dir.path().join("log.json");
 /// let log_path_str = log_path.to_str().unwrap();
 /// let log_path_string = String::from(log_path_str);
@@ -170,7 +170,7 @@ impl std::fmt::Display for CSVCleaningError {
 ///
 ///
 /// // Act
-/// let result = process_rows(&mut rdr, wtr, &log_path_string, &schema_path_string, buffer_size);
+/// let result = process_rows(&mut csv_rdr, csv_wtr, &log_path_string, &schema_path_string, buffer_size);
 /// let output_csv = fs::read_to_string(output_path).expect("To be able to read from file");
 ///
 ///
@@ -182,8 +182,8 @@ impl std::fmt::Display for CSVCleaningError {
 /// assert_eq!(result.expect("Key to be in map").get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
 /// ```
 pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
-    rdr: &mut Reader<R>,
-    mut wtr: Writer<W>,
+    csv_rdr: &mut Reader<R>,
+    mut csv_wtr: Writer<W>,
     log_path: &String,
     schema_path: &String,
     buffer_size: usize,
@@ -199,15 +199,15 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
     let schema_string = fs::read_to_string(schema_path)?;
     let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
     let schema_map = generate_validated_schema(json_schema)?;
-    let column_names = rdr.headers()?.clone();
+    let column_names = csv_rdr.headers()?.clone();
     let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
     if !spec_and_csv_columns_match {
         return Err(Box::new(CSVCleaningError::new(
             "Error: CSV columns and JSON spec columns do not match",
         )));
     }
-    wtr.write_record(&column_names)?;
-    let locked_wtr = Arc::new(Mutex::new(wtr));
+    csv_wtr.write_record(&column_names)?;
+    let locked_wtr = Arc::new(Mutex::new(csv_wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
     let mut row_buffer = Vec::new();
     let core_count = num_cpus::get();
@@ -217,7 +217,7 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
         .build()
         .unwrap();
     let mut job_counter = 0;
-    for row in rdr.deserialize() {
+    for row in csv_rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
         row_buffer.push(row_map);
