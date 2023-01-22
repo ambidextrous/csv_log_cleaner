@@ -181,9 +181,9 @@ impl std::fmt::Display for CSVCleaningError {
 /// assert_eq!(output_csv.len(), "NAME,AGE,DATE_OF_BIRTH\nRaul,27,2004-01-31\nDuke,,\n".len());
 /// assert_eq!(result.expect("Key to be in map").get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
 /// ```
-pub fn process_rows(
-    rdr: &mut Reader<impl io::Read>,
-    mut wtr: Writer<impl io::Write + std::marker::Send + std::marker::Sync + 'static>,
+pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
+    rdr: &mut Reader<R>,
+    mut wtr: Writer<W>,
     log_path: &String,
     schema_path: &String,
     buffer_size: usize,
@@ -287,12 +287,12 @@ pub fn process_rows(
     Ok(copy_to_std_hashmap(combined_log_map))
 }
 
-fn process_row_buffer<'a>(
+fn process_row_buffer<'a, W: io::Write + Send + Sync>(
     column_names: &'a StringRecord,
     schema_dict: &'a FxHashMap<String, Column>,
     row_buffer: &[FxHashMap<String, String>],
     constants: &Constants,
-    locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
+    locked_wtr: Arc<Mutex<Writer<W>>>,
     column_string_names: &[String],
     tx: Sender<FxHashMap<String, ColumnLog>>,
 ) -> Result<(), Box<dyn Error>> {
@@ -377,12 +377,12 @@ fn process_row<'a>(
     Ok(processed_record)
 }
 
-fn process_row_buffer_errors<'a>(
+fn process_row_buffer_errors<'a, W: io::Write + Send + Sync>(
     column_names: &'a StringRecord,
     schema_dict: &'a FxHashMap<String, Column>,
     row_buffer: &[FxHashMap<String, String>],
     constants: &Constants,
-    locked_wtr: Arc<Mutex<Writer<impl io::Write + Send + Sync>>>,
+    locked_wtr: Arc<Mutex<Writer<W>>>,
     column_string_names: &[String],
     tx: Sender<FxHashMap<String, ColumnLog>>,
     error_tx: Sender<Result<(), String>>,
