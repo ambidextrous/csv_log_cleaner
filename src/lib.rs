@@ -87,6 +87,12 @@ pub struct ColumnLog {
     pub min_invalid: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct CleansingLog {
+    pub total_rows: i32,
+    pub log_map: HashMap<String, ColumnLog>,
+}
+
 type Record = FxHashMap<String, String>;
 
 #[derive(Debug)]
@@ -136,9 +142,6 @@ impl std::fmt::Display for CSVCleaningError {
 /// fs::write(input_path.clone(), input_csv_data).expect("To be able to write file");
 /// let mut csv_rdr = Reader::from_path(input_path).expect("To be able to create reader");   
 /// let mut csv_wtr = Writer::from_path(output_path.clone()).expect("To be able to create writer");
-/// let log_path = dir.path().join("log.json");
-/// let log_path_str = log_path.to_str().unwrap();
-/// let log_path_string = String::from(log_path_str);
 /// let schema_path = dir.path().join("schema.json");
 /// let schema_path_str = schema_path.to_str().unwrap();
 /// let schema_path_string = String::from(schema_path_str);
@@ -170,7 +173,7 @@ impl std::fmt::Display for CSVCleaningError {
 ///
 ///
 /// // Act
-/// let result = process_rows(&mut csv_rdr, csv_wtr, &log_path_string, &schema_path_string, buffer_size);
+/// let result = process_rows(&mut csv_rdr, csv_wtr, &schema_path_string, buffer_size);
 /// let output_csv = fs::read_to_string(output_path).expect("To be able to read from file");
 ///
 ///
@@ -179,15 +182,14 @@ impl std::fmt::Display for CSVCleaningError {
 /// assert!(output_csv.contains("Raul,27,2004-01-31\n"));
 /// assert!(output_csv.contains("NAME,AGE,DATE_OF_BIRTH\n"));
 /// assert_eq!(output_csv.len(), "NAME,AGE,DATE_OF_BIRTH\nRaul,27,2004-01-31\nDuke,,\n".len());
-/// assert_eq!(result.expect("Key to be in map").get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
+/// assert_eq!(result.expect("Key to be in map").log_map.get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
 /// ```
 pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
     csv_rdr: &mut Reader<R>,
     mut csv_wtr: Writer<W>,
-    log_path: &String,
     schema_path: &String,
     buffer_size: usize,
-) -> Result<HashMap<String, ColumnLog>, Box<dyn Error>> {
+) -> Result<CleansingLog, Box<dyn Error>> {
     let (tx, rx): (
         Sender<FxHashMap<String, ColumnLog>>,
         Receiver<FxHashMap<String, ColumnLog>>,
@@ -278,13 +280,11 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
     for potential_error in error_rx.try_iter() {
         potential_error?;
     }
-    let log_map_all = jsonify_log_map(combined_log_map.clone(), &row_count);
-    let log_error_message = format!("Unable to write JSON log file to `{log_path}`");
-    fs::write(log_path, log_map_all).expect(&log_error_message);
-    let log_map_errors = jsonify_log_map_errors(combined_log_map.clone(), &row_count);
-    eprintln!("Finished processing CSV file. Error report:\n{log_map_errors}");
 
-    Ok(copy_to_std_hashmap(combined_log_map))
+    Ok(CleansingLog {
+        total_rows: row_count,
+        log_map: copy_to_std_hashmap(combined_log_map),
+    })
 }
 
 fn process_row_buffer<'a, W: io::Write + Send + Sync>(
@@ -487,6 +487,40 @@ impl ColumnLog {
     }
 }
 
+impl CleansingLog {
+    pub fn json(&self) -> String {
+        let mut combined_string = format!(
+            "{{\n\t\"total_rows\": {},\n\t\"columns_with_errors\": [\n\t\t",
+            self.total_rows
+        );
+        let mut is_first_row = true;
+        for (column_name, column_log) in self.log_map.iter() {
+            let mut max_val = String::new();
+            {
+                if let Some(x) = &column_log.max_invalid {
+                    max_val = x.clone();
+                }
+            }
+            let mut min_val = String::new();
+            {
+                if let Some(x) = &column_log.min_invalid {
+                    min_val = x.clone();
+                }
+            }
+            let invalid_row_count = column_log.invalid_count;
+            let col_string = format!("{{\n\t\t\t\"column_name\": \"{column_name}\",\n\t\t\t\"invalid_row_count\": {invalid_row_count},\n\t\t\t\"max_illegal_val\": \"{max_val}\",\n\t\t\t\"min_illegal_val\": \"{min_val}\"\n\t\t}}");
+            if is_first_row {
+                combined_string = format!("{combined_string}{col_string}");
+            } else {
+                combined_string = format!("{combined_string},{col_string}");
+            }
+            is_first_row = false;
+        }
+        combined_string = format!("{combined_string}\n\t]\n}}");
+        combined_string
+    }
+}
+
 fn generate_constants() -> Constants {
     let null_vals = vec![
         "#N/A".to_string(),
@@ -522,50 +556,6 @@ fn generate_constants() -> Constants {
         null_vals,
         bool_vals,
     }
-}
-
-fn jsonify_log_map_errors(log_map: FxHashMap<String, ColumnLog>, total_rows: &i32) -> String {
-    jsonify_log_map_all_or_errors(log_map, total_rows, &true)
-}
-
-fn jsonify_log_map(log_map: FxHashMap<String, ColumnLog>, total_rows: &i32) -> String {
-    jsonify_log_map_all_or_errors(log_map, total_rows, &false)
-}
-
-fn jsonify_log_map_all_or_errors(
-    log_map: FxHashMap<String, ColumnLog>,
-    total_rows: &i32,
-    errors_only: &bool,
-) -> String {
-    let mut combined_string =
-        format!("{{\n\t\"total_rows\": {total_rows},\n\t\"columns_with_errors\": [\n\t\t");
-    let mut is_first_row = true;
-    for (column_name, column_log) in log_map.iter() {
-        if column_log.invalid_count > 0 || !errors_only {
-            let mut max_val = String::new();
-            {
-                if let Some(x) = &column_log.max_invalid {
-                    max_val = x.clone();
-                }
-            }
-            let mut min_val = String::new();
-            {
-                if let Some(x) = &column_log.min_invalid {
-                    min_val = x.clone();
-                }
-            }
-            let invalid_row_count = column_log.invalid_count;
-            let col_string = format!("{{\n\t\t\t\"column_name\": \"{column_name}\",\n\t\t\t\"invalid_row_count\": {invalid_row_count},\n\t\t\t\"max_illegal_val\": \"{max_val}\",\n\t\t\t\"min_illegal_val\": \"{min_val}\"\n\t\t}}");
-            if is_first_row {
-                combined_string = format!("{combined_string}{col_string}");
-            } else {
-                combined_string = format!("{combined_string},{col_string}");
-            }
-            is_first_row = false;
-        }
-    }
-    combined_string = format!("{combined_string}\n\t]\n}}");
-    combined_string
 }
 
 fn generate_validated_schema(

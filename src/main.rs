@@ -1,6 +1,7 @@
 use clap::Parser;
 use csv_log_cleaner::process_rows;
 use std::error::Error;
+use std::fs;
 use std::io;
 use std::process;
 
@@ -29,7 +30,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     let wtr = csv::WriterBuilder::new()
         .delimiter(byte_sep)
         .from_writer(io::stdout());
-    process_rows(&mut rdr, wtr, &log_path, &schema_path, args.buffer_size)?;
+    let log_result = process_rows(&mut rdr, wtr, &schema_path, args.buffer_size)?;
+    fs::write(log_path, log_result.json())?;
 
     Ok(())
 }
