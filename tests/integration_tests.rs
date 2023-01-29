@@ -1,5 +1,5 @@
 use csv::Reader;
-use csv_log_cleaner::process_rows;
+use csv_log_cleaner::{get_schema_from_json_str, process_rows};
 use std::env::temp_dir;
 use std::fs;
 
@@ -7,6 +7,8 @@ use std::fs;
 fn end_to_end() {
     // Arrange
     let schema_path = format!("tests/e2e_data/test_schema.json");
+    let schema_string = fs::read_to_string(schema_path).unwrap();
+    let schema_map = get_schema_from_json_str(&schema_string).unwrap();
     let n_body_repetitions = 5000;
     let mock_header = "INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN\n";
     let mock_body = "4,dog,2020-12-31,V1
@@ -68,7 +70,7 @@ an_int,weasel,a_date,V5\n"
         + (expected_row_1.len() + expected_row_2.len() + expected_row_3.len()) * n_body_repetitions;
 
     // Act
-    let result = process_rows(&mut rdr, wtr, &schema_path, buffer_size);
+    let result = process_rows(&mut rdr, wtr, schema_map, buffer_size);
     fs::write(log_path.clone(), result.unwrap().json()).expect("Unable to write file");
     let output_csv =
         fs::read_to_string(output_csv_path).expect("Failed to read output CSV from temp dir");

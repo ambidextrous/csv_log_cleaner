@@ -38,7 +38,7 @@ enum ColumnType {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct Column {
+pub struct Column {
     column_type: ColumnType,
     illegal_val_replacement: String,
     legal_vals: Vec<String>,
@@ -51,7 +51,7 @@ struct Schema {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct JsonColumn {
+pub struct JsonColumn {
     name: String,
     column_type: ColumnType,
     illegal_val_replacement: Option<String>,
@@ -60,7 +60,7 @@ struct JsonColumn {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct JsonSchema {
+pub struct JsonSchema {
     columns: Vec<JsonColumn>,
 }
 
@@ -127,7 +127,7 @@ impl std::fmt::Display for CSVCleaningError {
 /// ```
 /// use std::error::Error;
 /// use csv::{Reader,Writer};
-/// use csv_log_cleaner::{process_rows,ColumnLog};
+/// use csv_log_cleaner::{process_rows, ColumnLog, get_schema_from_json_str};
 /// use tempfile::tempdir;
 /// use std::fs;
 ///
@@ -162,7 +162,7 @@ impl std::fmt::Display for CSVCleaningError {
 ///     }
 /// ]
 /// }"#;
-/// fs::write(schema_path, schema_string).expect("To be able to write file");
+/// let schema_map = get_schema_from_json_str(&schema_string).unwrap();
 /// let buffer_size = 1;
 /// let expected_date_of_birth_column_log = ColumnLog {
 ///     name: "DATE_OF_BIRTH".to_string(),
@@ -173,7 +173,7 @@ impl std::fmt::Display for CSVCleaningError {
 ///
 ///
 /// // Act
-/// let result = process_rows(&mut csv_rdr, csv_wtr, &schema_path_string, buffer_size);
+/// let result = process_rows(&mut csv_rdr, csv_wtr, schema_map, buffer_size);
 /// let output_csv = fs::read_to_string(output_path).expect("To be able to read from file");
 ///
 ///
@@ -187,7 +187,7 @@ impl std::fmt::Display for CSVCleaningError {
 pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
     csv_rdr: &mut Reader<R>,
     mut csv_wtr: Writer<W>,
-    schema_path: &String,
+    schema_map: FxHashMap<String, Column>,
     buffer_size: usize,
 ) -> Result<CleansingLog, Box<dyn Error>> {
     let (tx, rx): (
@@ -198,9 +198,6 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
         mpsc::channel();
     let mut row_count = 0;
     let constants = generate_constants();
-    let schema_string = fs::read_to_string(schema_path)?;
-    let json_schema: JsonSchema = serde_json::from_str(&schema_string)?;
-    let schema_map = generate_validated_schema(json_schema)?;
     let column_names = csv_rdr.headers()?.clone();
     let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
     if !spec_and_csv_columns_match {
@@ -485,6 +482,13 @@ impl ColumnLog {
             min_invalid: new_min,
         }
     }
+}
+
+pub fn get_schema_from_json_str(
+    schema_json_string: &str,
+) -> Result<FxHashMap<String, Column>, io::Error> {
+    let json_schema: JsonSchema = serde_json::from_str(&schema_json_string)?;
+    generate_validated_schema(json_schema)
 }
 
 impl CleansingLog {
