@@ -213,7 +213,7 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
     }
 }
 
-pub fn process_rows_internal<
+fn process_rows_internal<
     R: io::Read,
     W: io::Write + std::marker::Send + std::marker::Sync + 'static,
 >(
@@ -527,6 +527,32 @@ impl ColumnLog {
     }
 }
 
+/// Extracts a Result  containing a JsonSchema CSV cleansing specification from a JSON string specification.
+///
+/// Example
+/// ```
+/// use csv_log_cleaner::get_schema_from_json_str;
+///
+/// let schema_string = r#"{
+/// "columns": [
+///     {
+///         "name": "NAME",
+///         "column_type": "String"
+///     },
+///     {
+///         "name": "AGE",
+///         "column_type": "Int"
+///     },
+///     {
+///         "name": "DATE_OF_BIRTH",
+///         "column_type": "Date",
+///         "format": "%Y-%m-%d"
+///     }
+/// ]
+/// }"#;
+/// let schema_map = get_schema_from_json_str(&schema_string).unwrap();
+/// println!("{:?}", schema_map);
+/// ```
 pub fn get_schema_from_json_str(
     schema_json_string: &str,
 ) -> Result<FxHashMap<String, Column>, io::Error> {
