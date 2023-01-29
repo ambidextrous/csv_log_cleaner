@@ -1,5 +1,5 @@
 use clap::Parser;
-use csv_log_cleaner::{get_schema_from_json_str, process_rows, JsonSchema};
+use csv_log_cleaner::{get_schema_from_json_str, process_rows};
 use std::error::Error;
 use std::fs;
 use std::io;

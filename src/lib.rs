@@ -101,10 +101,8 @@ pub struct CSVCleansingError {
 }
 
 impl CSVCleansingError {
-    fn new(message: &str) -> CSVCleansingError {
-        CSVCleansingError {
-            message: message.to_string(),
-        }
+    fn new(message: String) -> CSVCleansingError {
+        CSVCleansingError { message: message }
     }
 }
 
@@ -189,7 +187,7 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
     let result = process_rows_internal(csv_rdr, csv_wtr, schema_map, buffer_size);
     match result {
         Ok(cleansing_log) => Ok(cleansing_log),
-        Err(err) => Err(CSVCleansingError::new(&err.to_string())),
+        Err(err) => Err(CSVCleansingError::new(err.to_string())),
     }
 }
 
@@ -214,7 +212,7 @@ pub fn process_rows_internal<
     let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
     if !spec_and_csv_columns_match {
         return Err(Box::new(CSVCleansingError::new(
-            "Error: CSV columns and JSON spec columns do not match",
+            "Error: CSV columns and schema columns do not match".to_string(),
         )));
     }
     csv_wtr.write_record(&column_names)?;
