@@ -11,7 +11,6 @@ use rustc_hash::FxHashMap; // Lots of small HashMaps used, so prioritize fast wr
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
 use std::io;
 use std::io::ErrorKind;
 use std::iter::Iterator;
@@ -62,6 +61,20 @@ pub struct JsonColumn {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct JsonSchema {
     columns: Vec<JsonColumn>,
+}
+
+#[derive(Debug, Clone)]
+struct ProcessRowBufferConfig<'a, W>
+where
+    W: io::Write + Send + Sync,
+{
+    column_names: &'a StringRecord,
+    schema_map: &'a FxHashMap<String, Column>,
+    row_buffer: &'a [FxHashMap<String, String>],
+    constants: &'a Constants,
+    locked_wtr: Arc<Mutex<Writer<W>>>,
+    column_string_names: &'a [String],
+    tx: Sender<FxHashMap<String, ColumnLog>>,
 }
 
 /// Holds data on the invalid count and max and min invalid string values
@@ -241,17 +254,17 @@ pub fn process_rows_internal<
             let thread_tx = tx.clone();
             let thread_error_tx = error_tx.clone();
             pool.spawn(move || {
-                process_row_buffer_errors(
-                    &cloned_column_names,
-                    &cloned_schema_map,
-                    &cloned_row_buffer,
-                    &cloned_constants,
-                    cloned_locked_wtr,
-                    &cloned_column_string_names,
-                    thread_tx,
-                    thread_error_tx,
-                )
-                .expect("Called function to deal with error before can bubble up this far");
+                let row_buffer_data = ProcessRowBufferConfig {
+                    column_names: &cloned_column_names,
+                    schema_map: &cloned_schema_map,
+                    row_buffer: &cloned_row_buffer,
+                    constants: &cloned_constants,
+                    locked_wtr: cloned_locked_wtr,
+                    column_string_names: &cloned_column_string_names,
+                    tx: thread_tx,
+                };
+                process_row_buffer_errors(row_buffer_data, thread_error_tx)
+                    .expect("Called function to deal with error before can bubble up this far");
             });
             row_buffer.clear();
         }
@@ -262,15 +275,16 @@ pub fn process_rows_internal<
     let thread_tx = tx;
     if !row_buffer.is_empty() {
         job_counter += 1;
-        process_row_buffer(
-            &column_names,
-            &schema_map,
-            &row_buffer,
-            &constants,
-            locked_wtr,
-            &column_string_names,
-            thread_tx,
-        )?;
+        let row_buffer_data = ProcessRowBufferConfig {
+            column_names: &column_names,
+            schema_map: &schema_map,
+            row_buffer: &row_buffer,
+            constants: &constants,
+            locked_wtr: locked_wtr,
+            column_string_names: &column_string_names,
+            tx: thread_tx,
+        };
+        process_row_buffer(row_buffer_data)?;
     }
     let mut combined_log_map = generate_column_log_map(&column_names, &column_string_names);
     for log_map in rx.iter() {
@@ -294,32 +308,28 @@ pub fn process_rows_internal<
     })
 }
 
-fn process_row_buffer<'a, W: io::Write + Send + Sync>(
-    column_names: &'a StringRecord,
-    schema_dict: &'a FxHashMap<String, Column>,
-    row_buffer: &[FxHashMap<String, String>],
-    constants: &Constants,
-    locked_wtr: Arc<Mutex<Writer<W>>>,
-    column_string_names: &[String],
-    tx: Sender<FxHashMap<String, ColumnLog>>,
-) -> Result<(), Box<dyn Error>> {
-    let mut buffer_log_map = generate_column_log_map(column_names, column_string_names);
+fn process_row_buffer<'a, W>(config: ProcessRowBufferConfig<'a, W>) -> Result<(), Box<dyn Error>>
+where
+    W: io::Write + Send + Sync,
+{
+    let mut buffer_log_map =
+        generate_column_log_map(config.column_names, config.column_string_names);
     let mut cleaned_rows = Vec::new();
-    for row_map in row_buffer.iter() {
+    for row_map in config.row_buffer.iter() {
         let cleaned_row = process_row(
-            column_names,
-            schema_dict,
+            config.column_names,
+            config.schema_map,
             row_map.clone(),
             &mut buffer_log_map,
-            constants,
+            config.constants,
         )?;
         cleaned_rows.push(cleaned_row);
     }
-    let mut wtr = locked_wtr.lock().unwrap();
+    let mut wtr = config.locked_wtr.lock().unwrap();
     for cleaned_row in cleaned_rows.iter() {
         wtr.write_record(cleaned_row)?;
     }
-    tx.send(buffer_log_map).unwrap();
+    config.tx.send(buffer_log_map).unwrap();
 
     Ok(())
 }
@@ -384,25 +394,14 @@ fn process_row<'a>(
     Ok(processed_record)
 }
 
-fn process_row_buffer_errors<'a, W: io::Write + Send + Sync>(
-    column_names: &'a StringRecord,
-    schema_dict: &'a FxHashMap<String, Column>,
-    row_buffer: &[FxHashMap<String, String>],
-    constants: &Constants,
-    locked_wtr: Arc<Mutex<Writer<W>>>,
-    column_string_names: &[String],
-    tx: Sender<FxHashMap<String, ColumnLog>>,
+fn process_row_buffer_errors<'a, W>(
+    config: ProcessRowBufferConfig<'a, W>,
     error_tx: Sender<Result<(), String>>,
-) -> Result<(), Box<dyn Error>> {
-    let buffer_processing_result = process_row_buffer(
-        &column_names,
-        &schema_dict,
-        &row_buffer,
-        &constants,
-        locked_wtr,
-        &column_string_names,
-        tx,
-    );
+) -> Result<(), Box<dyn Error>>
+where
+    W: io::Write + Send + Sync,
+{
+    let buffer_processing_result = process_row_buffer(config);
     if let Err(err) = buffer_processing_result {
         // Can't send Box<dyn Error>> between threads, so convert e
         // to String before sending through channel
@@ -449,8 +448,8 @@ fn generate_column_log_map(
         })
         .collect();
     let mut_log_map: FxHashMap<String, ColumnLog> = column_string_names
-        .to_owned()
-        .into_iter()
+        .iter()
+        .cloned()
         .zip(column_logs.iter().cloned())
         .collect();
     mut_log_map
@@ -497,7 +496,7 @@ impl ColumnLog {
 pub fn get_schema_from_json_str(
     schema_json_string: &str,
 ) -> Result<FxHashMap<String, Column>, io::Error> {
-    let json_schema: JsonSchema = serde_json::from_str(&schema_json_string)?;
+    let json_schema: JsonSchema = serde_json::from_str(schema_json_string)?;
     generate_validated_schema(json_schema)
 }
 
@@ -580,7 +579,7 @@ fn generate_validated_schema(
     let mut column_map: FxHashMap<String, Column> = FxHashMap::default();
     for column in json_schema.columns {
         let new_col = Column {
-            column_type: column.column_type.clone(),
+            column_type: column.column_type,
             illegal_val_replacement: column
                 .illegal_val_replacement
                 .unwrap_or_else(|| empty_string.clone()),
