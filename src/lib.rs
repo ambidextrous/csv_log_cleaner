@@ -222,6 +222,7 @@ pub fn process_rows_internal<
     schema_map: FxHashMap<String, Column>,
     buffer_size: usize,
 ) -> Result<CleansingLog, Box<dyn Error>> {
+    // Setup multi-threaded processing
     let (tx, rx): (MapSender, MapReceiver) = mpsc::channel();
     let (error_tx, error_rx): (StringSender, StringReciever) = mpsc::channel();
     let mut row_count = 0;
@@ -234,6 +235,7 @@ pub fn process_rows_internal<
     let mut row_buffer = Vec::new();
     let pool = create_thread_pool()?;
     let mut job_counter = 0;
+    // Read input to buffer on one thread; process and write output on other threads as buffer fills
     for row in csv_rdr.deserialize() {
         row_count += 1;
         let row_map: Record = row?;
@@ -268,6 +270,8 @@ pub fn process_rows_internal<
         }
     }
     let thread_tx = tx;
+
+    // Process any remaining rows in buffer
     if !row_buffer.is_empty() {
         job_counter += 1;
         let row_buffer_data = ProcessRowBufferConfig {
@@ -281,6 +285,8 @@ pub fn process_rows_internal<
         };
         process_row_buffer(row_buffer_data)?;
     }
+
+    // Combined logs and raise any error messages sent by threads
     let combined_log_map =
         generate_combined_log_map(&column_names, column_string_names, rx, job_counter)?;
     for potential_error in error_rx.try_iter() {
