@@ -131,7 +131,7 @@ impl Error for CSVCleansingError {}
 
 impl std::fmt::Display for CSVCleansingError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.message)
+        f.write_str(&self.message)
     }
 }
 
@@ -226,12 +226,7 @@ pub fn process_rows_internal<
     let mut row_count = 0;
     let constants = generate_constants();
     let column_names = csv_rdr.headers()?.clone();
-    let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
-    if !spec_and_csv_columns_match {
-        return Err(Box::new(CSVCleansingError::new(
-            "Error: CSV columns and schema columns do not match".to_string(),
-        )));
-    }
+    check_spec_valid_for_input(&column_names, &schema_map)?;
     csv_wtr.write_record(&column_names)?;
     let locked_wtr = Arc::new(Mutex::new(csv_wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
@@ -418,6 +413,20 @@ fn copy_to_std_hashmap(fast_map: FxHashMap<String, ColumnLog>) -> HashMap<String
         regular_map.insert(key, value);
     }
     regular_map
+}
+
+fn check_spec_valid_for_input(
+    column_names: &StringRecord,
+    schema_map: &FxHashMap<String, Column>,
+) -> Result<(), Box<dyn Error>> {
+    let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
+    if !spec_and_csv_columns_match {
+        return Err(Box::new(CSVCleansingError::new(
+            "Error: CSV columns and schema columns do not match".to_string(),
+        )));
+    }
+
+    Ok(())
 }
 
 fn are_equal_spec_and_csv_columns(
