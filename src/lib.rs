@@ -96,25 +96,21 @@ pub struct CleansingLog {
 type Record = FxHashMap<String, String>;
 
 #[derive(Debug)]
-struct CSVCleaningError {
+pub struct CSVCleansingError {
     message: String,
 }
 
-impl CSVCleaningError {
-    fn new(message: &str) -> CSVCleaningError {
-        CSVCleaningError {
+impl CSVCleansingError {
+    fn new(message: &str) -> CSVCleansingError {
+        CSVCleansingError {
             message: message.to_string(),
         }
     }
 }
 
-impl Error for CSVCleaningError {
-    fn description(&self) -> &str {
-        &self.message
-    }
-}
+impl Error for CSVCleansingError {}
 
-impl std::fmt::Display for CSVCleaningError {
+impl std::fmt::Display for CSVCleansingError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.message)
     }
@@ -189,6 +185,22 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
     mut csv_wtr: Writer<W>,
     schema_map: FxHashMap<String, Column>,
     buffer_size: usize,
+) -> Result<CleansingLog, CSVCleansingError> {
+    let result = process_rows_internal(csv_rdr, csv_wtr, schema_map, buffer_size);
+    match result {
+        Ok(cleansing_log) => Ok(cleansing_log),
+        Err(err) => Err(CSVCleansingError::new(&err.to_string())),
+    }
+}
+
+pub fn process_rows_internal<
+    R: io::Read,
+    W: io::Write + std::marker::Send + std::marker::Sync + 'static,
+>(
+    csv_rdr: &mut Reader<R>,
+    mut csv_wtr: Writer<W>,
+    schema_map: FxHashMap<String, Column>,
+    buffer_size: usize,
 ) -> Result<CleansingLog, Box<dyn Error>> {
     let (tx, rx): (
         Sender<FxHashMap<String, ColumnLog>>,
@@ -201,7 +213,7 @@ pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker:
     let column_names = csv_rdr.headers()?.clone();
     let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
     if !spec_and_csv_columns_match {
-        return Err(Box::new(CSVCleaningError::new(
+        return Err(Box::new(CSVCleansingError::new(
             "Error: CSV columns and JSON spec columns do not match",
         )));
     }
