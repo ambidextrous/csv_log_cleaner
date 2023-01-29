@@ -123,7 +123,7 @@ pub struct CSVCleansingError {
 
 impl CSVCleansingError {
     fn new(message: String) -> CSVCleansingError {
-        CSVCleansingError { message: message }
+        CSVCleansingError { message }
     }
 }
 
@@ -201,7 +201,7 @@ impl std::fmt::Display for CSVCleansingError {
 /// ```
 pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
     csv_rdr: &mut Reader<R>,
-    mut csv_wtr: Writer<W>,
+    csv_wtr: Writer<W>,
     schema_map: FxHashMap<String, Column>,
     buffer_size: usize,
 ) -> Result<CleansingLog, CSVCleansingError> {
@@ -283,7 +283,7 @@ pub fn process_rows_internal<
             schema_map: &schema_map,
             row_buffer: &row_buffer,
             constants: &constants,
-            locked_wtr: locked_wtr,
+            locked_wtr,
             column_string_names: &column_string_names,
             tx: thread_tx,
         };
@@ -359,10 +359,8 @@ fn process_row<'a>(
                 format!("Key error, could not find column_name `{column_name}` in log_map`")
             })?;
             let invalid_count = column_log.invalid_count + 1;
-            let mut max_invalid = None::<String>;
-            max_invalid = column_log.max_invalid.clone();
-            let mut min_invalid = None::<String>;
-            min_invalid = column_log.min_invalid.clone();
+            let mut max_invalid = column_log.max_invalid.clone();
+            let mut min_invalid = column_log.min_invalid.clone();
             match &column_log.max_invalid {
                 Some(x) => {
                     if &processed_value > x {
@@ -668,32 +666,6 @@ impl Process for String {
     }
 }
 
-fn get_null_vals() -> Vec<String> {
-    // Values that will be treated as NULL, based on the ones used by
-    // Pandas: https://pandas.pydata.org/docs/reference/api/pandas.read_csv.html
-    let null_vals = vec![
-        "#N/A".to_string(),
-        "#N/A".to_string(),
-        "N/A".to_string(),
-        "#NA".to_string(),
-        "-1.#IND".to_string(),
-        "-1.#QNAN".to_string(),
-        "-NaN".to_string(),
-        "-nan".to_string(),
-        "1.#IND".to_string(),
-        "1.#QNAN".to_string(),
-        "<NA>".to_string(),
-        "N/A".to_string(),
-        "NA".to_string(),
-        "NULL".to_string(),
-        "NaN".to_string(),
-        "n/a".to_string(),
-        "nan".to_string(),
-        "null".to_string(),
-    ];
-    null_vals
-}
-
 trait Clean {
     fn clean(&self, constants: &Constants) -> Self;
 }
@@ -795,19 +767,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_csv() {
-        let contents = "\
-INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
-1,some_string,2020-12-01,V3
--2,<NA>,2020-12-02,V4";
-    }
-
-    #[test]
     fn clean_string() {
         // Arrange
         let input = vec!["NULL".to_string(), String::new(), " dog\t".to_string()];
         let expected = vec![String::new(), String::new(), " dog\t".to_string()];
-        let null_vals = get_null_vals();
         let constants = generate_constants();
         // Act
         let result = input
@@ -1025,7 +988,6 @@ INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN
             "1".to_string(),
             "dog".to_string(),
         ];
-        let legal = vec!["A".to_string(), "B".to_string()];
         let expected = vec![true, true, true, true, true, true, false];
         let constants = generate_constants();
         // Act
