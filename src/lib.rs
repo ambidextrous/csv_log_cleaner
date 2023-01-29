@@ -7,6 +7,7 @@
 
 use chrono::NaiveDate;
 use csv::{Reader, StringRecord, Writer};
+use rayon::{ThreadPool, ThreadPoolBuildError};
 use rustc_hash::FxHashMap; // Lots of small HashMaps used, so prioritize fast writes and look ups over collision avoidance
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -231,11 +232,7 @@ pub fn process_rows_internal<
     let locked_wtr = Arc::new(Mutex::new(csv_wtr));
     let column_string_names: Vec<String> = column_names.iter().map(|x| x.to_string()).collect();
     let mut row_buffer = Vec::new();
-    let core_count = num_cpus::get();
-    let num_threads = if core_count == 1 { 1 } else { core_count - 1 };
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build()?;
+    let pool = create_thread_pool()?;
     let mut job_counter = 0;
     for row in csv_rdr.deserialize() {
         row_count += 1;
@@ -413,6 +410,14 @@ fn copy_to_std_hashmap(fast_map: FxHashMap<String, ColumnLog>) -> HashMap<String
         regular_map.insert(key, value);
     }
     regular_map
+}
+
+fn create_thread_pool() -> Result<ThreadPool, ThreadPoolBuildError> {
+    let core_count = num_cpus::get();
+    let num_threads = if core_count == 1 { 1 } else { core_count - 1 };
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
 }
 
 fn check_spec_valid_for_input(
