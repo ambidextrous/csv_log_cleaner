@@ -437,14 +437,10 @@ fn are_equal_spec_and_csv_columns(
     csv_columns_record: &StringRecord,
     spec: &FxHashMap<String, Column>,
 ) -> bool {
-    let mut csv_columns: Vec<String> = csv_columns_record
-        .iter()
-        .map(|field| field.to_string())
-        .collect();
-    let mut spec_columns: Vec<String> = spec.keys().cloned().collect();
-    csv_columns.sort();
-    spec_columns.sort();
-    csv_columns == spec_columns
+    csv_columns_record.len() == spec.len()
+        && csv_columns_record
+            .iter()
+            .all(|field| spec.contains_key(field))
 }
 
 fn generate_column_log_map(
