@@ -77,6 +77,14 @@ where
     tx: Sender<FxHashMap<String, ColumnLog>>,
 }
 
+type StringSender = Sender<Result<(), String>>;
+
+type StringReciever = Receiver<Result<(), String>>;
+
+type MapSender = Sender<FxHashMap<String, ColumnLog>>;
+
+type MapReceiver = Receiver<FxHashMap<String, ColumnLog>>;
+
 /// Holds data on the invalid count and max and min invalid string values
 /// (calculated by String comparison) found in that column.
 ///
@@ -92,7 +100,7 @@ where
 ///     min_invalid: Some("2004-31-01".to_string()),
 /// };
 /// ```
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ColumnLog {
     pub name: String,
     pub invalid_count: i32,
@@ -100,7 +108,7 @@ pub struct ColumnLog {
     pub min_invalid: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct CleansingLog {
     pub total_rows: i32,
     pub log_map: HashMap<String, ColumnLog>,
@@ -213,12 +221,8 @@ pub fn process_rows_internal<
     schema_map: FxHashMap<String, Column>,
     buffer_size: usize,
 ) -> Result<CleansingLog, Box<dyn Error>> {
-    let (tx, rx): (
-        Sender<FxHashMap<String, ColumnLog>>,
-        Receiver<FxHashMap<String, ColumnLog>>,
-    ) = mpsc::channel();
-    let (error_tx, error_rx): (Sender<Result<(), String>>, Receiver<Result<(), String>>) =
-        mpsc::channel();
+    let (tx, rx): (MapSender, MapReceiver) = mpsc::channel();
+    let (error_tx, error_rx): (StringSender, StringReciever) = mpsc::channel();
     let mut row_count = 0;
     let constants = generate_constants();
     let column_names = csv_rdr.headers()?.clone();
@@ -236,8 +240,7 @@ pub fn process_rows_internal<
     let num_threads = if core_count == 1 { 1 } else { core_count - 1 };
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
-        .build()
-        .unwrap();
+        .build()?;
     let mut job_counter = 0;
     for row in csv_rdr.deserialize() {
         row_count += 1;
@@ -308,7 +311,7 @@ pub fn process_rows_internal<
     })
 }
 
-fn process_row_buffer<'a, W>(config: ProcessRowBufferConfig<'a, W>) -> Result<(), Box<dyn Error>>
+fn process_row_buffer<W>(config: ProcessRowBufferConfig<W>) -> Result<(), Box<dyn Error>>
 where
     W: io::Write + Send + Sync,
 {
@@ -329,7 +332,7 @@ where
     for cleaned_row in cleaned_rows.iter() {
         wtr.write_record(cleaned_row)?;
     }
-    config.tx.send(buffer_log_map).unwrap();
+    config.tx.send(buffer_log_map)?;
 
     Ok(())
 }
@@ -394,8 +397,8 @@ fn process_row<'a>(
     Ok(processed_record)
 }
 
-fn process_row_buffer_errors<'a, W>(
-    config: ProcessRowBufferConfig<'a, W>,
+fn process_row_buffer_errors<W>(
+    config: ProcessRowBufferConfig<W>,
     error_tx: Sender<Result<(), String>>,
 ) -> Result<(), Box<dyn Error>>
 where
@@ -405,7 +408,7 @@ where
     if let Err(err) = buffer_processing_result {
         // Can't send Box<dyn Error>> between threads, so convert e
         // to String before sending through channel
-        error_tx.send(Err(err.to_string())).unwrap();
+        error_tx.send(Err(err.to_string()))?;
     }
 
     Ok(())
