@@ -259,7 +259,7 @@ pub fn process_rows_internal<
                     tx: thread_tx,
                 };
                 process_row_buffer_errors(row_buffer_data, thread_error_tx)
-                    .expect("Called function to deal with error before can bubble up this far");
+                    .expect("Fatal error calling ThreadPool::spawn");
             });
             row_buffer.clear();
         }
@@ -281,18 +281,8 @@ pub fn process_rows_internal<
         };
         process_row_buffer(row_buffer_data)?;
     }
-    let mut combined_log_map = generate_column_log_map(&column_names, &column_string_names);
-    for log_map in rx.iter() {
-        job_counter -= 1;
-        for (column_name, column_log) in log_map {
-            let unwrapped_log = combined_log_map.get(&column_name.clone()).unwrap();
-            let updated_log = unwrapped_log.update(&column_log);
-            combined_log_map.insert(column_name.clone(), updated_log);
-        }
-        if job_counter < 1 {
-            break;
-        }
-    }
+    let combined_log_map =
+        generate_combined_log_map(&column_names, column_string_names, rx, job_counter)?;
     for potential_error in error_rx.try_iter() {
         potential_error?;
     }
@@ -320,7 +310,10 @@ where
         )?;
         cleaned_rows.push(cleaned_row);
     }
-    let mut wtr = config.locked_wtr.lock().unwrap();
+    let mut wtr = config
+        .locked_wtr
+        .lock()
+        .expect("Fatal error attempting to aquire Writer in function process_row_buffer");
     for cleaned_row in cleaned_rows.iter() {
         wtr.write_record(cleaned_row)?;
     }
@@ -468,6 +461,30 @@ fn generate_column_log_map(
         .zip(column_logs.iter().cloned())
         .collect();
     mut_log_map
+}
+
+fn generate_combined_log_map(
+    column_names: &StringRecord,
+    column_string_names: Vec<String>,
+    rx: MapReceiver,
+    mut job_counter: i32,
+) -> Result<FxHashMap<String, ColumnLog>, Box<dyn Error>> {
+    let mut combined_log_map = generate_column_log_map(column_names, &column_string_names);
+    for log_map in rx.iter() {
+        job_counter -= 1;
+        for (column_name, column_log) in log_map {
+            let obtained_log = combined_log_map.get(&column_name.clone()).ok_or_else(|| {
+                format!("Key error, could not find column_name `{column_name}` in log map")
+            })?;
+            let updated_log = obtained_log.update(&column_log);
+            combined_log_map.insert(column_name.clone(), updated_log);
+        }
+        if job_counter < 1 {
+            break;
+        }
+    }
+
+    Ok(combined_log_map)
 }
 
 impl ColumnLog {
