@@ -27,7 +27,7 @@ struct Constants {
     bool_vals: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Copy)]
 enum ColumnType {
     String,
     Int,
