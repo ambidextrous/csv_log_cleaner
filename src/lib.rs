@@ -117,13 +117,27 @@ pub struct CleansingLog {
 
 type Record = FxHashMap<String, String>;
 
+/// Error representing a problem that occurred during the CSV cleaning process.
+///
+/// ```
+/// use csv_log_cleaner::CSVCleansingError;
+///
+/// assert_eq!(CSVCleansingError::new("Test error message".to_string()).to_string(), "Test error message".to_string());
+/// ```
 #[derive(Debug)]
 pub struct CSVCleansingError {
     message: String,
 }
 
 impl CSVCleansingError {
-    fn new(message: String) -> CSVCleansingError {
+    /// Error representing a problem that occurred during the CSV cleaning process.
+    ///
+    /// ```
+    /// use csv_log_cleaner::CSVCleansingError;
+    ///
+    /// assert_eq!(CSVCleansingError::new("Test error message".to_string()).to_string(), "Test error message".to_string());
+    /// ```
+    pub fn new(message: String) -> CSVCleansingError {
         CSVCleansingError { message }
     }
 }
@@ -143,7 +157,7 @@ impl std::fmt::Display for CSVCleansingError {
 /// ```
 /// use std::error::Error;
 /// use csv::{Reader,Writer};
-/// use csv_log_cleaner::{process_rows, ColumnLog, get_schema_from_json_str};
+/// use csv_log_cleaner::{clean_csv, ColumnLog, get_schema_from_json_str};
 /// use tempfile::tempdir;
 /// use std::fs;
 ///
@@ -189,40 +203,42 @@ impl std::fmt::Display for CSVCleansingError {
 ///
 ///
 /// // Act
-/// let result = process_rows(&mut csv_rdr, csv_wtr, schema_map, buffer_size);
+/// let result = clean_csv(&mut csv_rdr, csv_wtr, schema_map, buffer_size);
 /// let output_csv = fs::read_to_string(output_path).expect("To be able to read from file");
-///
+/// let log_map = result.expect("Result to have content").log_map;
 ///
 /// // Assert
 /// assert!(output_csv.contains("Duke,,\n"));
 /// assert!(output_csv.contains("Raul,27,2004-01-31\n"));
 /// assert!(output_csv.contains("NAME,AGE,DATE_OF_BIRTH\n"));
 /// assert_eq!(output_csv.len(), "NAME,AGE,DATE_OF_BIRTH\nRaul,27,2004-01-31\nDuke,,\n".len());
-/// assert_eq!(result.expect("Key to be in map").log_map.get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
+/// assert_eq!(log_map.get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
+/// println!("{:?}", log_map);
 /// ```
-pub fn process_rows<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
+pub fn clean_csv<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
     csv_rdr: &mut Reader<R>,
     csv_wtr: Writer<W>,
-    schema_map: FxHashMap<String, Column>,
+    schema_map: HashMap<String, Column>,
     buffer_size: usize,
 ) -> Result<CleansingLog, CSVCleansingError> {
-    let result = process_rows_internal(csv_rdr, csv_wtr, schema_map, buffer_size);
+    let result = process_rows_private(csv_rdr, csv_wtr, schema_map, buffer_size);
     match result {
         Ok(cleansing_log) => Ok(cleansing_log),
         Err(err) => Err(CSVCleansingError::new(err.to_string())),
     }
 }
 
-fn process_rows_internal<
+fn process_rows_private<
     R: io::Read,
     W: io::Write + std::marker::Send + std::marker::Sync + 'static,
 >(
     csv_rdr: &mut Reader<R>,
     mut csv_wtr: Writer<W>,
-    schema_map: FxHashMap<String, Column>,
+    schema_map: HashMap<String, Column>,
     buffer_size: usize,
 ) -> Result<CleansingLog, Box<dyn Error>> {
-    // Setup multi-threaded processing
+    // Set up multi-threaded processing
+    let schema_map = convert_from_std_hashmap(&schema_map);
     let (tx, rx): (MapSender, MapReceiver) = mpsc::channel();
     let (error_tx, error_rx): (StringSender, StringReciever) = mpsc::channel();
     let mut row_count = 0;
@@ -295,7 +311,7 @@ fn process_rows_internal<
 
     Ok(CleansingLog {
         total_rows: row_count,
-        log_map: copy_to_std_hashmap(combined_log_map),
+        log_map: convert_to_std_hashmap(combined_log_map),
     })
 }
 
@@ -403,12 +419,19 @@ where
     Ok(())
 }
 
-fn copy_to_std_hashmap(fast_map: FxHashMap<String, ColumnLog>) -> HashMap<String, ColumnLog> {
+fn convert_to_std_hashmap(fast_map: FxHashMap<String, ColumnLog>) -> HashMap<String, ColumnLog> {
     let mut regular_map = HashMap::new();
     for (key, value) in fast_map {
         regular_map.insert(key, value);
     }
     regular_map
+}
+
+fn convert_from_std_hashmap(input_hashmap: &HashMap<String, Column>) -> FxHashMap<String, Column> {
+    input_hashmap
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 fn create_thread_pool() -> Result<ThreadPool, ThreadPoolBuildError> {
@@ -423,7 +446,7 @@ fn check_spec_valid_for_input(
     column_names: &StringRecord,
     schema_map: &FxHashMap<String, Column>,
 ) -> Result<(), Box<dyn Error>> {
-    let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(&column_names, &schema_map);
+    let spec_and_csv_columns_match = are_equal_spec_and_csv_columns(column_names, schema_map);
     if !spec_and_csv_columns_match {
         return Err(Box::new(CSVCleansingError::new(
             "Error: CSV columns and schema columns do not match".to_string(),
@@ -555,7 +578,7 @@ impl ColumnLog {
 /// ```
 pub fn get_schema_from_json_str(
     schema_json_string: &str,
-) -> Result<FxHashMap<String, Column>, io::Error> {
+) -> Result<HashMap<String, Column>, io::Error> {
     let json_schema: JsonSchema = serde_json::from_str(schema_json_string)?;
     generate_validated_schema(json_schema)
 }
@@ -633,10 +656,10 @@ fn generate_constants() -> Constants {
 
 fn generate_validated_schema(
     json_schema: JsonSchema,
-) -> Result<FxHashMap<String, Column>, io::Error> {
+) -> Result<HashMap<String, Column>, io::Error> {
     let empty_vec: Vec<String> = Vec::new();
     let empty_string = String::new();
-    let mut column_map: FxHashMap<String, Column> = FxHashMap::default();
+    let mut column_map: HashMap<String, Column> = HashMap::default();
     for column in json_schema.columns {
         let new_col = Column {
             column_type: column.column_type,

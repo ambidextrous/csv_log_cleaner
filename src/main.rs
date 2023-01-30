@@ -1,5 +1,5 @@
 use clap::Parser;
-use csv_log_cleaner::{get_schema_from_json_str, process_rows};
+use csv_log_cleaner::{clean_csv, get_schema_from_json_str};
 use std::error::Error;
 use std::fs;
 use std::io;
@@ -31,7 +31,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let wtr = csv::WriterBuilder::new()
         .delimiter(byte_sep)
         .from_writer(io::stdout());
-    let log_result = process_rows(&mut rdr, wtr, schema_map, args.buffer_size)?;
+    let log_result = clean_csv(&mut rdr, wtr, schema_map, args.buffer_size)?;
     fs::write(log_path, log_result.json())?;
 
     Ok(())

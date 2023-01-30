@@ -1,5 +1,5 @@
 use csv::Reader;
-use csv_log_cleaner::{get_schema_from_json_str, process_rows};
+use csv_log_cleaner::{clean_csv, get_schema_from_json_str};
 use std::env::temp_dir;
 use std::fs;
 
@@ -70,7 +70,7 @@ an_int,weasel,a_date,V5\n"
         + (expected_row_1.len() + expected_row_2.len() + expected_row_3.len()) * n_body_repetitions;
 
     // Act
-    let result = process_rows(&mut rdr, wtr, schema_map, buffer_size);
+    let result = clean_csv(&mut rdr, wtr, schema_map, buffer_size);
     fs::write(log_path.clone(), result.unwrap().json()).expect("Unable to write file");
     let output_csv =
         fs::read_to_string(output_csv_path).expect("Failed to read output CSV from temp dir");
