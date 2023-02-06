@@ -1,6 +1,7 @@
 use clap::Parser;
-use csv_log_cleaner::process_rows;
+use csv_log_cleaner::{clean_csv, get_schema_from_json_str};
 use std::error::Error;
+use std::fs;
 use std::io;
 use std::process;
 
@@ -21,15 +22,17 @@ struct Args {
 fn run() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let log_path = args.log;
-    let schema_path = args.schema;
     let byte_sep = args.sep as u8;
+    let schema_string = fs::read_to_string(args.schema)?;
+    let schema_map = get_schema_from_json_str(&schema_string)?;
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(byte_sep)
         .from_reader(io::stdin());
     let wtr = csv::WriterBuilder::new()
         .delimiter(byte_sep)
         .from_writer(io::stdout());
-    process_rows(&mut rdr, wtr, &log_path, &schema_path, args.buffer_size)?;
+    let log_result = clean_csv(&mut rdr, wtr, schema_map, args.buffer_size)?;
+    fs::write(log_path, log_result.json())?;
 
     Ok(())
 }
