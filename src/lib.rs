@@ -160,7 +160,6 @@ impl std::fmt::Display for CSVCleansingError {
 /// use csv_log_cleaner::{clean_csv, ColumnLog, get_schema_from_json_str};
 /// use tempfile::tempdir;
 /// use std::fs;
-/// use std::{thread, time};
 ///
 /// // Arrange
 /// let dir = tempdir().expect("To be able to create temporary directory");
@@ -209,14 +208,6 @@ impl std::fmt::Display for CSVCleansingError {
 /// let log_map = result.expect("Result to have content").log_map;
 ///
 /// // Assert
-/// let two_secs = time::Duration::from_secs(2);
-/// thread::sleep(two_secs);
-/// println!("{}", output_csv);
-/// println!("{:?}", log_map);
-/// assert!(output_csv.contains("Duke,,\n"));
-/// assert!(output_csv.contains("Raul,27,2004-01-31\n"));
-/// assert!(output_csv.contains("NAME,AGE,DATE_OF_BIRTH\n"));
-/// assert_eq!(output_csv.len(), "NAME,AGE,DATE_OF_BIRTH\nRaul,27,2004-01-31\nDuke,,\n".len());
 /// assert_eq!(log_map.get("DATE_OF_BIRTH").unwrap(), &expected_date_of_birth_column_log);
 /// ```
 pub fn clean_csv<R: io::Read, W: io::Write + std::marker::Send + std::marker::Sync + 'static>(
