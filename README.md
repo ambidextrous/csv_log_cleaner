@@ -27,7 +27,7 @@ Data is processed row-wise, in adjustably sized buffers using all of the availab
 
 ### Source 
 
-The source can be found on GitHub, [here](https://github.com/ambidextrous/csv_log_cleaner). PR-requests to make improvements, add missing functionality or fix bugs are all very welcome; as is opening of GitHub issues to request changes or fixes.
+Library code available as a cargo [crate](https://crates.io/crates/csv_log_cleaner). Source code can be found on GitHub, [here](https://github.com/ambidextrous/csv_log_cleaner). PR-requests to make improvements, add missing functionality or fix bugs are all very welcome; as is opening of GitHub issues to request changes or fixes.
 
 ## Motivation
 
