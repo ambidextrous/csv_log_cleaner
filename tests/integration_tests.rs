@@ -13,7 +13,8 @@ fn end_to_end() {
     let mock_header = "INT_COLUMN,STRING_COLUMN,DATE_COLUMN,ENUM_COLUMN\n";
     let mock_body = "4,dog,2020-12-31,V1
 not_an_int,cat,not_a_date,V2
-an_int,weasel,a_date,V5\n"
+an_int,weasel,a_date,V5
+,<NA>,NULL,None\n"
         .repeat(n_body_repetitions);
     let mock_input = mock_header.to_owned() + &mock_body;
     let expected_log = format!(
@@ -39,14 +40,14 @@ an_int,weasel,a_date,V5\n"
 			"column_name": "ENUM_COLUMN",
 			"invalid_row_count": {},
 			"max_illegal_val": "V5",
-			"min_illegal_val": "V5"
+			"min_illegal_val": "None"
 		}}
 	]
 }}"#,
-        3 * n_body_repetitions,
+        4 * n_body_repetitions,
         2 * n_body_repetitions,
         2 * n_body_repetitions,
-        n_body_repetitions
+        2 * n_body_repetitions
     );
     let mut rdr = Reader::from_reader(mock_input.as_bytes());
     let dir = temp_dir();
@@ -66,8 +67,13 @@ an_int,weasel,a_date,V5\n"
     let expected_row_1 = ",weasel,,V1\n";
     let expected_row_2 = "4,dog,2020-12-31,V1\n";
     let expected_row_3 = ",cat,,V2\n";
+    let expected_row_4 = ",,,V1\n";
     let expected_len = expected_header.len()
-        + (expected_row_1.len() + expected_row_2.len() + expected_row_3.len()) * n_body_repetitions;
+        + (expected_row_1.len()
+            + expected_row_2.len()
+            + expected_row_3.len()
+            + expected_row_4.len())
+            * n_body_repetitions;
 
     // Act
     let result = clean_csv(&mut rdr, wtr, schema_map, buffer_size);
