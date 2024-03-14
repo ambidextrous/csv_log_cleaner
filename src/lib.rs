@@ -5,6 +5,8 @@
 //! # Documentation
 //! [Github](https://github.com/ambidextrous/csv_log_cleaner)
 
+use cached::proc_macro::cached;
+use cached::SizedCache;
 use chrono::NaiveDate;
 use csv::{Reader, StringRecord, Writer};
 use rayon::{ThreadPool, ThreadPoolBuildError};
@@ -12,6 +14,7 @@ use rustc_hash::FxHashMap; // Lots of small HashMaps used, so prioritize fast wr
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt;
 use std::io;
 use std::io::ErrorKind;
 use std::iter::Iterator;
@@ -21,13 +24,13 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::vec::Vec;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 struct Constants {
     null_vals: Vec<String>,
     bool_vals: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Copy, Hash, Eq)]
 enum ColumnType {
     String,
     Int,
@@ -37,12 +40,18 @@ enum ColumnType {
     Bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, Hash, PartialEq)]
 pub struct Column {
+    name: String,
     column_type: ColumnType,
     illegal_val_replacement: String,
     legal_vals: Vec<String>,
     format: String,
+}
+impl fmt::Display for Column {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Column{{ name: {} }}", self.name)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -113,6 +122,22 @@ pub struct ColumnLog {
 pub struct CleansingLog {
     pub total_rows: i32,
     pub log_map: HashMap<String, ColumnLog>,
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct ValueProcessingData {
+    string: String,
+    column: Column,
+    constants: Constants,
+}
+impl fmt::Display for ValueProcessingData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ValueProcessingData{{ string: {}, column: {} }}",
+            self.string, self.column
+        )
+    }
 }
 
 type Record = FxHashMap<String, String>;
@@ -355,7 +380,12 @@ fn process_row<'a>(
         let column = schema_dict.get(column_name).ok_or_else(|| {
             format!("Key error, could not find column_name `{column_name}` in schema`")
         })?;
-        let processed_value = cleaned_value.process(column, constants);
+        let value_processing_data: ValueProcessingData = ValueProcessingData {
+            string: cleaned_value.clone(),
+            column: column.clone(),
+            constants: constants.clone(),
+        };
+        let processed_value: String = process_vals(value_processing_data);
         if processed_value != cleaned_value {
             let column_log = log_map.get(column_name).ok_or_else(|| {
                 format!("Key error, could not find column_name `{column_name}` in log_map`")
@@ -657,6 +687,7 @@ fn generate_validated_schema(
     let mut column_map: HashMap<String, Column> = HashMap::default();
     for column in json_schema.columns {
         let new_col = Column {
+            name: column.name.clone(),
             column_type: column.column_type,
             illegal_val_replacement: column
                 .illegal_val_replacement
@@ -738,6 +769,59 @@ impl Process for String {
                 } else {
                     column.illegal_val_replacement.to_owned()
                 }
+            }
+        }
+    }
+}
+
+#[cached(
+    type = "SizedCache<ValueProcessingData, String>",
+    create = "{ SizedCache::with_size(1000) }"
+)]
+fn process_vals(value_processing_data: ValueProcessingData) -> String {
+    let s = value_processing_data.string;
+    let column = value_processing_data.column;
+    let constants = value_processing_data.constants;
+    match column.column_type {
+        ColumnType::String => s.to_string(),
+        ColumnType::Int => {
+            let cleaned = s.de_pseudofloat();
+            if cleaned.casts_to_int() {
+                cleaned
+            } else {
+                column.illegal_val_replacement.to_owned()
+            }
+        }
+        ColumnType::Date => {
+            let cleaned = s;
+            if cleaned.casts_to_date(&column.format) {
+                cleaned.to_string()
+            } else {
+                column.illegal_val_replacement.to_owned()
+            }
+        }
+        ColumnType::Float => {
+            let cleaned = s;
+            if cleaned.casts_to_float() {
+                cleaned.to_string()
+            } else {
+                column.illegal_val_replacement.to_owned()
+            }
+        }
+        ColumnType::Enum => {
+            let cleaned = s;
+            if cleaned.casts_to_enum(&column.legal_vals) {
+                cleaned.to_string()
+            } else {
+                column.illegal_val_replacement.to_owned()
+            }
+        }
+        ColumnType::Bool => {
+            let cleaned = s;
+            if cleaned.casts_to_bool(&constants) {
+                cleaned.to_string()
+            } else {
+                column.illegal_val_replacement.to_owned()
             }
         }
     }
@@ -908,6 +992,7 @@ mod tests {
         let expected = vec![String::new(), " foo\t".to_string(), "bar".to_string()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
+            name: String::new(),
             column_type: ColumnType::String,
             illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
@@ -930,6 +1015,7 @@ mod tests {
         let expected = vec!["1".to_string(), "-2".to_string(), String::new()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
+            name: String::new(),
             column_type: ColumnType::Int,
             illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
@@ -976,6 +1062,7 @@ mod tests {
         let expected = vec!["2020-01-01".to_string(), String::new(), String::new()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
+            name: String::new(),
             column_type: ColumnType::Date,
             illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
@@ -1016,6 +1103,7 @@ mod tests {
         let expected = vec![String::new(), String::new(), "123.456".to_string()];
         let legal_vals: Vec<String> = Vec::new();
         let column = Column {
+            name: String::new(),
             column_type: ColumnType::Float,
             illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
@@ -1083,6 +1171,7 @@ mod tests {
         let expected = vec![String::new(), String::new(), "B".to_string()];
         let legal_vals = vec!["A".to_string(), "B".to_string()];
         let column = Column {
+            name: String::new(),
             column_type: ColumnType::Enum,
             illegal_val_replacement: String::new(),
             legal_vals: legal_vals,
