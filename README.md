@@ -18,6 +18,8 @@ cat tests/e2e_data/test_input.csv | csv_log_cleaner -j '{"columns": [{"name": "I
 ```
 Here `cat` writes the file contents to `stdin`, `csv_log_cleaner` cleans them, `tail` skips the first row (the header) and `sort` sorts the remaining rows by the contents of teh 4th column.
 
+To use the functionality as a library in your Rust project, run `cargo add csv_log_cleaner`.
+
 ## Description
 
 The `csv_log_cleaner` tool takes a JSON CSV schema definition (e.g. one defining a `NAME` column of type String, an `AGE` column of type Int and a `DATE_OF_BIRTH` column of type Date) and a `CSV` file which is required to conform to that definition and cleans the input data to conform with the schema definition.
