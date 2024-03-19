@@ -2,11 +2,12 @@
 
 ## Name
 
-`csv_log_cleaner` - Clean CSV files to conform to a type schema by streaming them from `stdin` to `stdout` through a small memory buffers using multiple threads and logging data loss.
+`csv_log_cleaner` - Clean CSV files to conform to a type schema by streaming them from `stdin` to `stdout` through a small, configurable memory buffer, using multiple threads and logging data loss.
 
-## Synopsis
+## Quick Start
 
 ```
+cargo install csv_log_cleaner
 cat input.csv | csv_log_cleaner -j schema.json -l log.json > output.csv
 ```
 
@@ -16,7 +17,7 @@ The `csv_log_cleaner` tool takes a JSON CSV schema definition (e.g. one defining
 
 Illegal values are either cleaned (e.g. by adding `.0` to the end of integer values in a float column) or deleted (e.g. by replacing a `not_a_float` string value in a float column with an empty string), with all data loss being logged in an output JSON file, along with the maximum and minimum illegal values encountered.
 
-Data is processed row-wise, in adjustably sized buffers using all of the available cores for parallel processing. The aim here is to make it possible to process larger-than-memory datasets quickly and efficiently, as part of an extendable Unix pipeline.
+Data is processed row-wise, in adjustably-sized buffers using all of the available cores for parallel processing. The aim here is to make it possible to process larger-than-memory datasets quickly and efficiently, as part of an extendable Unix pipeline.
 
 ### Parameters
 
@@ -41,7 +42,7 @@ A second is what could be labelled as "Total Strictness". This is the default st
 
 To overcome the limitations of Total Permissiveness and Total Strictness, a third approach is sometimes used, which could be labelled as "Silent Coercion". This approach means a type schema for the CSV data is used, and that if - for example - a single illegal `12.34\n` float value is found in a column, that value will be silently replaced with a NULL value. This approach means that it is possible to keep both the writing and processing code simple, but means insidous data loss can go undetected. For example, this approach could result in an entire `DATE_OF_BIRTH` field being silently replaced with `NULL` values because the dates were formatted as `YYYY-DD-MM` instead of the expected `YYYY-MM-DD` format.
 
-The aim of `csv_log_cleaner` is to enable data processors to make use of an approach that could be labelled as "Coercion with Logging". In this approach, the user provides a type schema definition for their CSV data and the tool will guarantee that the data piped through the tool will conform that schema (e.g. by removing the illegal trailing `\n` from the end of a `12.34\n` value in a float column, or by deleting entirely a `not_a_valid_float` value from the same column) and logging both the number of deleted values in each column and the maximum and minimum illegal values encountered. This means that users can be confident that their pipeline will not fail due to input type errors either on read or during processing. In addition, any data loss that does take place during the cleaning operation will be logged in a human and computer readable JSON log file - including sample maximum and mimumn illegal values found and illegal value counts and proportions - which can be used to monitor data loss. For example, a monitoring script could be used to ignore data loss in a particular columm if it is below a given threshold value (e.g. 1%) and to raise an alert otherwise.
+The aim of `csv_log_cleaner` is to enable data processors to make use of an approach that could be labelled as "Coercion with Data Loss Logging". In this approach, the user provides a type schema definition for their CSV data and the tool will guarantee that the data piped through the tool will conform that schema (e.g. by removing the illegal trailing `\n` from the end of a `12.34\n` value in a float column, or by deleting entirely a `not_a_valid_float` value from the same column) and logging both the number of deleted values in each column and the maximum and minimum illegal values encountered. This means that users can be confident that their pipeline will not fail due to input type errors either on read or during processing. In addition, any data loss that does take place during the cleaning operation will be logged in a human and computer readable JSON log file - including sample maximum and mimumn illegal values found and illegal value counts and proportions - which can be used to monitor data loss. For example, a monitoring script could be used to ignore data loss in a particular columm if it is below a given threshold value (e.g. 1%) and to raise an alert otherwise.
 
 ## Why a CLI tool?
 
@@ -198,3 +199,9 @@ To run the relase build:
 ```
 cat test_input.csv | target/release/csv_log_cleaner -j test_schema.json -l test_log.json > test_output.csv
 ```
+To install and run the latest version using `cargo`:
+```
+cargo install csv_log_cleaner
+cat test_input.csv | csv_log_cleaner -j test_schema.json -l test_log.json > test_output.csv
+```
+

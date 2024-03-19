@@ -15,7 +15,7 @@ struct Args {
     log: String,
     #[clap(short = 's', long, value_parser, default_value_t = ',')]
     sep: char,
-    #[clap(short = 'b', long, value_parser, default_value_t = 1_000_000)]
+    #[clap(short = 'b', long, value_parser, default_value_t = 1_000)]
     buffer_size: usize,
 }
 
