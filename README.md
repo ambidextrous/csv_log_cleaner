@@ -1,15 +1,22 @@
 # CSV Cleaner
 
-## Name
+## What is this?
 
-`csv_log_cleaner` - Clean CSV files to conform to a type schema by streaming them from `stdin` to `stdout` through a small, configurable memory buffer, using multiple threads and logging data loss.
+`csv_log_cleaner` - Clean Comma Separated Value (CSV) files to conform to a given type schema by parallelized streaming through configurably-sized memory buffers, with column-wise logging of any resulting data loss. The tool is a good fit for processing arbitrarily large files in memory-constrained environments.
 
 ## Quick Start
 
+Build from source and clean the test data:
+```bash
+cargo build --release
+./target/release/csv_log_cleaner -i tests/e2e_data/test_input.csv -o cleaned.csv -j tests/e2e_data/test_schema.json -l log.json
 ```
+Install latest version using `cargo` and pipe data from `stdin` to `stdout` through a series of linux Command Line Interface (CLI) tools, using in-line schema definition:
+```bash
 cargo install csv_log_cleaner
-cat input.csv | csv_log_cleaner -j schema.json -l log.json > output.csv
+cat tests/e2e_data/test_input.csv | csv_log_cleaner -j '{"columns": [{"name": "INT_COLUMN","column_type": "Int"},{"name": "STRING_COLUMN","column_type": "String","nullable": false},{"name": "DATE_COLUMN","column_type": "Date","format": "%Y-%m-%d"},{"name": "ENUM_COLUMN","column_type": "Enum","nullable": false,"legal_vals": ["V1", "V2", "V3"],"illegal_val_replacement": "V1"}]}' -l log.json | tail -n +2 | sort -t ',' -k4
 ```
+Here `cat` writes the file contents to `stdin`, `csv_log_cleaner` cleans them, `tail` skips the first row (the header) and `sort` sorts the remaining rows by the contents of teh 4th column.
 
 ## Description
 
@@ -21,14 +28,16 @@ Data is processed row-wise, in adjustably-sized buffers using all of the availab
 
 ### Parameters
 
-`-j --schema` - _required_ path to input JSON schema file
-`-l --log` - _required_ path to output JOSN log file
-`-s --sep` - _optional_ (default `','`) separator character, e.g. `'\t'` for TSV files: will be used both in input and output
-`-b --buffer_size` - _optional_ buffer size integer (default  `1000`) indicating the size of each new buffer of rows allocated a new thread for processing: if set too low, the costs of thread switching are likely to outweight the benefits of parallel processing. 
+- `-j --schema` - _required_ can be either the path to a JSON schema file with a name of the form `*.json` or an in-line JSON-string definition, e.g. `'{"columns": [{"name": "INT_COLUMN","column_type": "Int"},{"name": "STRING_COLUMN","column_type": "String","nullable": false}]}'`
+- `-l --log` - _required_ path to output JSON log file
+- `-i --input` - _optional_ path to input CSV file, if not provided will read from `stdin`
+- `-o --output` - _optional_ path to input CSV file, if not provided will write to `stout`
+- `-s --sep` - _optional_ (default `','`) separator character, e.g. `'\t'` for TSV files: will be used both in input and output
+- `-b --buffer_size` - _optional_ buffer size integer (default  `1000`) indicating the number of rows to be held in each buffer of rows allocated a new thread for processing. The programme uses all available threads, so if there are 10 cores available, and the buffer value is set to 1,000, then up to 10,000 rows will be held in buffers at any one time during processing.
 
 ### Source 
 
-Library code available as a cargo [crate](https://crates.io/crates/csv_log_cleaner). Source code can be found on GitHub, [here](https://github.com/ambidextrous/csv_log_cleaner). PR-requests to make improvements, add missing functionality or fix bugs are all very welcome; as is opening of GitHub issues to request changes or fixes.
+Library code available as a cargo [crate](https://crates.io/crates/csv_log_cleaner). Source code can be found on GitHub, [here](https://github.com/ambidextrous/csv_log_cleaner). PR-requests to make improvements, add missing functionality or fix bugs are all very welcome; as is opening of GitHub issues to request fixes or features.
 
 ## Motivation
 
@@ -46,7 +55,7 @@ The aim of `csv_log_cleaner` is to enable data processors to make use of an appr
 
 ## Why a CLI tool?
 
-Unix Command Line Interface (CLI) tools have been developed and refined since the 1970s as a simple, fast, memory-efficient, composable way of getting things done.
+Unix Command Line Interface (CLI) tools have been developed and refined since the 1970s as a simple, fast, memory-efficient, composable way of processing data.
 
 ## Examples
 
