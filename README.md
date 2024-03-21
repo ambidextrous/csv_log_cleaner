@@ -4,6 +4,8 @@
 
 `csv_log_cleaner` - Cleans [Comma Separated Value (CSV)](https://en.wikipedia.org/wiki/Comma-separated_values) files to conform to a given type schema by parallelized streaming through configurably-sized memory buffers, with column-wise logging of any resulting data loss. Prepares unvalidated data in CSV tables for use in databases or data pipelines. Processes arbitrarily large files in memory-constrained environments.
 
+Written in Rust, `csv_log_cleaner` compiles down to a Command Line Interface (CLI) tool which is available as single, small binary for Linux, Mac or Windows (available for download from GitHub), or as a library for use in other Rust projects as a `cargo` crate.
+
 ## Quick Start
 
 Build from source and clean the test data:
