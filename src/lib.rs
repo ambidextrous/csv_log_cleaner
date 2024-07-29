@@ -20,6 +20,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::vec::Vec;
+use std::str::Split;
 
 #[derive(Debug, Clone)]
 struct Constants {
@@ -837,6 +838,86 @@ fn rem_last_n_chars(value: &str, n: i32) -> &str {
         chars.next_back();
     }
     chars.as_str()
+}
+
+fn generate_sql_parsing_error(sql_string: &str, error_string: &str) -> CSVCleansingError {
+    let message: String = format!("Unable to parse SQL string {sql_string}, expected creation statement of form `CREATE TABLE my_table ( INT_COLUMN Int, STRING_COLUMN String, DATE_COLUMN '%Y-%m-%d' )` {error_string}");
+    let csv_cleansing_error = CSVCleansingError::new(message);
+    csv_cleansing_error
+}
+
+fn parse_sql_create_to_json(sql_string: &str) -> Result<JsonSchema, CSVCleansingError> {
+    let cleaned_sql_str: String = sql_string.trim().replace("\"", "'");
+    let first_word_option = cleaned_sql_str.split(' ').next();
+    let first_word: &str;
+    match first_word_option {
+        Some(result) => first_word = result,
+        None => {
+            let csv_error = generate_sql_parsing_error(sql_string, "Empty SQL statement found");
+            return Err(csv_error);
+        },
+    };
+    if first_word.to_uppercase() != "CREATE" {
+        let csv_error = generate_sql_parsing_error(sql_string, "SQL CREATE statement should begin with `CREATE`");
+        return Err(csv_error);
+    };
+    let left_bracket_split_sql = cleaned_sql_str.split("(");
+    let _ = left_bracket_split_sql.next();
+    let columns_definition_sql_plus_closing_option = left_bracket_split_sql.next();
+    let columns_definition_sql_plus_closing;
+    match columns_definition_sql_plus_closing_option {
+        Some(result) => columns_definition_sql_plus_closing = result,
+        None => {
+            let csv_error = generate_sql_parsing_error(sql_string, "No column definitions found");
+            return Err(csv_error);
+        },
+    };
+    let columns_definition_sql_plus_closing_split = columns_definition_sql_plus_closing.split(")");
+    let columns_definition_sql_option = columns_definition_sql_plus_closing_split.next();
+    let columns_definition_sql;
+    match columns_definition_sql_option {
+        Some(result) => columns_definition_sql = result,
+        None => {
+            let csv_error = generate_sql_parsing_error(sql_string, "No closing ')' found to CREATE statement");
+            return Err(csv_error);
+        },
+    };    
+    let colum_defintion_sql_lines: Split<&str> = columns_definition_sql.split(",");
+
+
+}
+
+
+fn generate_json_columns_from_sql(column_definition_sql_lines: Split<&str>) -> Result<Vec<JsonColumn>, CSVCleansingError> {
+    let json_columns: Vec<JsonColumn>;
+    for line in column_definition_sql_lines {
+        let mut split_line: Split<&str> = line.split(" ");
+        let mut column_name_string: &str = "";
+        let column_name_option = split_line.next();
+        let column_name: &str;
+        match column_name_option {
+            Some(result) => column_name_string = result,
+            None => {
+                let csv_error = generate_sql_parsing_error(line, "Missing column name");
+                return Err(csv_error);
+            },
+        }; 
+        let column_type_string;
+        let column_type_option = split_line.next();
+        match column_type_option {
+            Some(result) => column_type_string = result,
+            None => {
+                let csv_error = generate_sql_parsing_error(line, "Missing column type");
+                return Err(csv_error);
+            },
+        }; 
+        let column_type: ColumnType;
+        match column_type_string.to_uppercase() {
+            "STRING" | "STR" => column_type = ColumnType::String;
+        }
+    }
+
+    Ok(json_columns)
 }
 
 #[cfg(test)]
